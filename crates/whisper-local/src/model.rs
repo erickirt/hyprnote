@@ -44,9 +44,7 @@ impl WhisperBuilder {
     }
 
     pub fn build(self) -> Whisper {
-        if !cfg!(debug_assertions) {
-            unsafe { Self::suppress_log() };
-        }
+        unsafe { Self::suppress_log() };
 
         let context_param = {
             let mut p = WhisperContextParameters::default();
@@ -64,10 +62,8 @@ impl WhisperBuilder {
         let token_eot = ctx.token_eot();
         let token_beg = ctx.token_beg();
 
-        let language = self.language.unwrap_or(Language::En);
-
         Whisper {
-            language,
+            language: self.language,
             static_prompt: self.static_prompt.unwrap_or_default(),
             dynamic_prompt: self.dynamic_prompt.unwrap_or_default(),
             state,
@@ -88,7 +84,7 @@ impl WhisperBuilder {
 }
 
 pub struct Whisper {
-    language: Language,
+    language: Option<Language>,
     static_prompt: String,
     dynamic_prompt: String,
     state: WhisperState,
@@ -112,11 +108,11 @@ impl Whisper {
             tracing::info!(initial_prompt = ?initial_prompt, "transcribe");
 
             p.set_translate(false);
-            p.set_language(Some(self.language.as_ref()));
+            p.set_language(self.language.as_ref().map(|l| l.as_ref()));
             p.set_initial_prompt(&initial_prompt);
 
             unsafe {
-                Self::suppress_beg(&mut p, self.token_beg);
+                Self::suppress_beg(&mut p, &self.token_beg);
             }
 
             p.set_no_timestamps(true);
@@ -208,7 +204,7 @@ impl Whisper {
         total_confidence / valid_tokens as f32
     }
 
-    unsafe fn suppress_beg(params: &mut FullParams, token_beg: WhisperToken) {
+    unsafe fn suppress_beg(params: &mut FullParams, token_beg: &WhisperToken) {
         unsafe extern "C" fn logits_filter_callback(
             _ctx: *mut whisper_rs::whisper_rs_sys::whisper_context,
             _state: *mut whisper_rs::whisper_rs_sys::whisper_state,
@@ -227,7 +223,7 @@ impl Whisper {
 
         params.set_filter_logits_callback(Some(logits_filter_callback));
         params.set_filter_logits_callback_user_data(
-            &token_beg as *const WhisperToken as *mut std::ffi::c_void,
+            token_beg as *const WhisperToken as *mut std::ffi::c_void,
         );
     }
 }
@@ -239,7 +235,7 @@ pub struct Segment {
     pub start: f32,
     pub end: f32,
     pub confidence: f32,
-    pub metadata: Option<serde_json::Value>,
+    pub meta: Option<serde_json::Value>,
 }
 
 impl Segment {
@@ -263,8 +259,8 @@ impl Segment {
         self.confidence
     }
 
-    pub fn metadata(&self) -> Option<&serde_json::Value> {
-        self.metadata.as_ref()
+    pub fn meta(&self) -> Option<serde_json::Value> {
+        self.meta.clone()
     }
 
     pub fn trim(&mut self) {

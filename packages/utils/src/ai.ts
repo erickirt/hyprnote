@@ -4,7 +4,7 @@ import { customProvider, extractReasoningMiddleware, type TextStreamPart, type T
 import { commands as connectorCommands } from "@hypr/plugin-connector";
 import { fetch as customFetch } from "@hypr/utils";
 
-export { generateObject, generateText, type Provider, smoothStream, streamText } from "ai";
+export { generateObject, generateText, type Provider, smoothStream, streamText, tool } from "ai";
 
 import { useChat as useChat$1 } from "@ai-sdk/react";
 
@@ -33,6 +33,10 @@ const thinkMiddleware = extractReasoningMiddleware({
 const getModel = async ({ onboarding }: { onboarding: boolean }) => {
   const getter = onboarding ? connectorCommands.getLocalLlmConnection : connectorCommands.getLlmConnection;
   const { type, connection: { api_base, api_key } } = await getter();
+
+  if (!api_base) {
+    throw new Error("no_api_base");
+  }
 
   const openai = createOpenAICompatible({
     name: type === "HyprLocal" ? localProviderName : remoteProviderName,
