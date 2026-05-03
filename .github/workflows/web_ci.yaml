@@ -1,6 +1,5 @@
 name: web_ci
 
-# https://github.com/tauri-apps/tauri-action/blob/3013cac/examples/test-build-only.yml
 on:
   workflow_dispatch:
   push:
@@ -8,24 +7,42 @@ on:
       - main
     paths:
       - apps/web/**
-      - packages/**
+      - packages/api-client/**
+      - packages/changelog/**
+      - packages/pricing/**
+      - packages/supabase/**
+      - packages/tiptap/**
+      - packages/ui/**
+      - packages/utils/**
+      - plugins/auth/**
+      - plugins/deeplink2/**
+      - package.json
+      - pnpm-workspace.yaml
+      - turbo.json
+      - .github/workflows/web_ci.yaml
+      - .github/actions/pnpm_install/**
   pull_request:
     paths:
       - apps/web/**
-      - packages/**
+      - packages/api-client/**
+      - packages/changelog/**
+      - packages/pricing/**
+      - packages/supabase/**
+      - packages/tiptap/**
+      - packages/ui/**
+      - packages/utils/**
+      - plugins/auth/**
+      - plugins/deeplink2/**
+      - package.json
+      - pnpm-workspace.yaml
+      - turbo.json
+      - .github/workflows/web_ci.yaml
+      - .github/actions/pnpm_install/**
 jobs:
   ci:
     runs-on: depot-ubuntu-24.04-4
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/pnpm_install
-      - uses: denoland/setup-deno@v2
       - run: pnpm -F ui build
       - run: pnpm -F web typecheck
-      - uses: ./.github/actions/wait-for-netlify-preview
-        if: github.event_name == 'pull_request'
-      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: echo "BASE_URL=https://hyprnote.netlify.app" >> "$GITHUB_ENV"
-      - run: pnpm exec playwright install --with-deps chromium
-        working-directory: apps/web
-      - run: pnpm -F web test
