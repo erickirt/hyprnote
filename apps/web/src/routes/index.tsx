@@ -4,7 +4,7 @@ import { ChevronDown } from "lucide-react";
 
 import { getGitHubStars } from "@/functions/github";
 import {
-  CHAR_SITE_URL,
+  ANARLOG_SITE_URL,
   ROOT_DESCRIPTION,
   getOrganizationJsonLd,
   getSoftwareApplicationJsonLd,
@@ -62,7 +62,7 @@ export const Route = createFileRoute("/")({
     githubStars: await getGitHubStars(),
   }),
   head: () => ({
-    links: [{ rel: "canonical", href: CHAR_SITE_URL }],
+    links: [{ rel: "canonical", href: ANARLOG_SITE_URL }],
     scripts: [
       {
         type: "application/ld+json",
