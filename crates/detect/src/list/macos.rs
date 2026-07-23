@@ -3,9 +3,17 @@ use std::path::{Path, PathBuf};
 use cidre::core_audio as ca;
 use hypr_bundle::{is_app_bundle, read_bundle_info};
 use objc2_app_kit::NSRunningApplication;
+use objc2_foundation::NSString;
 use sysinfo::{Pid, System};
 
 use super::InstalledApp;
+
+const APPLE_CALL_DAEMON_IDS: &[&str] = &[
+    "/usr/libexec/avconferenced",
+    "com.apple.avconferenced",
+    "com.apple.TelephonyUtilities",
+    "com.apple.TelephonyUtilities.callservicesd",
+];
 
 #[cfg(target_os = "macos")]
 struct MicProcessSnapshot {
@@ -92,7 +100,54 @@ pub fn list_mic_using_apps() -> Result<Vec<InstalledApp>, crate::Error> {
         }
     });
 
-    build_mic_using_apps(snapshots, resolve_to_app, fallback_app_for_pid)
+    let mut apps = build_mic_using_apps(snapshots, resolve_to_app, fallback_app_for_pid)?;
+    label_apple_call_daemon(&mut apps, detected_apple_call_app_name());
+    Ok(apps)
+}
+
+fn detected_apple_call_app_name() -> Option<&'static str> {
+    let face_time = apple_call_app_state("com.apple.FaceTime");
+    let phone = apple_call_app_state("com.apple.mobilephone");
+
+    select_apple_call_app_name(face_time.0, face_time.1, phone.0, phone.1)
+}
+
+fn apple_call_app_state(bundle_id: &str) -> (bool, bool) {
+    let bundle_id = NSString::from_str(bundle_id);
+    let apps = NSRunningApplication::runningApplicationsWithBundleIdentifier(&bundle_id);
+    (!apps.is_empty(), apps.iter().any(|app| app.isActive()))
+}
+
+fn select_apple_call_app_name(
+    face_time_running: bool,
+    face_time_active: bool,
+    phone_running: bool,
+    phone_active: bool,
+) -> Option<&'static str> {
+    if face_time_active {
+        return Some("FaceTime");
+    }
+    if phone_active {
+        return Some("iPhone Call");
+    }
+
+    match (face_time_running, phone_running) {
+        (true, false) => Some("FaceTime"),
+        (false, true) => Some("iPhone Call"),
+        _ => None,
+    }
+}
+
+fn label_apple_call_daemon(apps: &mut [InstalledApp], running_app_name: Option<&str>) {
+    let Some(running_app_name) = running_app_name else {
+        return;
+    };
+
+    for app in apps {
+        if APPLE_CALL_DAEMON_IDS.contains(&app.id.as_str()) {
+            app.name = running_app_name.to_string();
+        }
+    }
 }
 
 fn resolve_to_app(pid: i32) -> Option<InstalledApp> {
@@ -277,6 +332,60 @@ mod tests {
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].id, "pid:7");
         assert_eq!(apps[0].name, "Fallback");
+    }
+
+    #[test]
+    fn test_select_apple_call_app_name_uses_only_running_app() {
+        assert_eq!(
+            select_apple_call_app_name(true, false, false, false),
+            Some("FaceTime")
+        );
+        assert_eq!(
+            select_apple_call_app_name(false, false, true, false),
+            Some("iPhone Call")
+        );
+    }
+
+    #[test]
+    fn test_select_apple_call_app_name_uses_active_app_when_both_are_running() {
+        assert_eq!(
+            select_apple_call_app_name(true, true, true, false),
+            Some("FaceTime")
+        );
+        assert_eq!(
+            select_apple_call_app_name(true, false, true, true),
+            Some("iPhone Call")
+        );
+    }
+
+    #[test]
+    fn test_select_apple_call_app_name_leaves_ambiguous_apps_unlabeled() {
+        assert_eq!(select_apple_call_app_name(true, false, true, false), None);
+    }
+
+    #[test]
+    fn test_label_apple_call_daemon_uses_detected_call_app_name() {
+        let mut apps = vec![InstalledApp {
+            id: "com.apple.avconferenced".to_string(),
+            name: "avconferenced".to_string(),
+        }];
+
+        label_apple_call_daemon(&mut apps, Some("FaceTime"));
+
+        assert_eq!(apps[0].id, "com.apple.avconferenced");
+        assert_eq!(apps[0].name, "FaceTime");
+    }
+
+    #[test]
+    fn test_label_apple_call_daemon_leaves_other_apps_unchanged() {
+        let mut apps = vec![InstalledApp {
+            id: "us.zoom.xos".to_string(),
+            name: "zoom.us".to_string(),
+        }];
+
+        label_apple_call_daemon(&mut apps, Some("FaceTime"));
+
+        assert_eq!(apps[0].name, "zoom.us");
     }
 
     #[test]
