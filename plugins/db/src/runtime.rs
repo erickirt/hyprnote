@@ -9,6 +9,10 @@ use tauri::ipc::Channel;
 use crate::{QueryEvent, Result, TransactionStatement};
 
 const DEFAULT_CLOUDSYNC_INTERVAL_MS: u64 = 30_000;
+const CLOUDSYNC_FULL_RESYNC_MAX_RETRY_DELAY: std::time::Duration =
+    std::time::Duration::from_secs(5 * 60);
+const CLOUDSYNC_FULL_RESYNC_MIN_RETRY_DELAY: std::time::Duration =
+    std::time::Duration::from_secs(5);
 const CLOUDSYNC_WRITE_FILTER: &str =
     "workspace_id IN (SELECT allowed_workspace_id FROM cloudsync_writable_workspaces)";
 
@@ -161,6 +165,49 @@ pub struct PluginDbRuntime {
     executor: DbExecutor,
     live_query_runtime: LiveQueryRuntime<QueryEventChannel>,
     e2ee_sync_hook: std::sync::Arc<E2eeSyncHook>,
+    scheduled_cloudsync_full_resync: std::sync::Arc<std::sync::Mutex<CloudsyncFullResyncSchedule>>,
+}
+
+#[derive(Default)]
+struct CloudsyncFullResyncSchedule {
+    generation: Option<String>,
+    restart_requested: bool,
+}
+
+impl CloudsyncFullResyncSchedule {
+    fn claim(&mut self, generation: &str) -> bool {
+        if self.generation.as_deref() == Some(generation) {
+            self.restart_requested = true;
+            return false;
+        }
+
+        self.generation = Some(generation.to_string());
+        self.restart_requested = false;
+        true
+    }
+
+    fn is_active(&self, generation: &str) -> bool {
+        self.generation.as_deref() == Some(generation)
+    }
+
+    fn handle_non_transient_error(&mut self, generation: &str) -> bool {
+        if !self.is_active(generation) {
+            return false;
+        }
+        if std::mem::take(&mut self.restart_requested) {
+            return true;
+        }
+
+        self.generation = None;
+        false
+    }
+
+    fn complete(&mut self, generation: &str) {
+        if self.is_active(generation) {
+            self.generation = None;
+            self.restart_requested = false;
+        }
+    }
 }
 
 impl PluginDbRuntime {
@@ -174,6 +221,7 @@ impl PluginDbRuntime {
             executor: DbExecutor::new(std::sync::Arc::clone(&db)),
             live_query_runtime: LiveQueryRuntime::new(db),
             e2ee_sync_hook,
+            scheduled_cloudsync_full_resync: Default::default(),
         }
     }
 
@@ -616,30 +664,63 @@ impl PluginDbRuntime {
     }
 
     fn schedule_cloudsync_full_resync(&self, generation: String) {
+        {
+            let mut scheduled = self.scheduled_cloudsync_full_resync.lock().unwrap();
+            if !scheduled.claim(&generation) {
+                return;
+            }
+        }
+
         let db = std::sync::Arc::clone(&self.db);
+        let scheduled = std::sync::Arc::clone(&self.scheduled_cloudsync_full_resync);
         tokio::spawn(async move {
-            for attempt in 0..3 {
+            let mut retry_delay = CLOUDSYNC_FULL_RESYNC_MIN_RETRY_DELAY;
+            loop {
+                if !scheduled.lock().unwrap().is_active(&generation) {
+                    return;
+                }
+
                 match db.cloudsync_trigger_sync().await {
                     Ok(result) if cloudsync_snapshot_completed(&result) => {
-                        if let Err(error) =
-                            hypr_db_app::clear_cloudsync_full_resync_pending(db.pool(), &generation)
-                                .await
+                        match hypr_db_app::clear_cloudsync_full_resync_pending(
+                            db.pool(),
+                            &generation,
+                        )
+                        .await
                         {
-                            tracing::warn!(%error, "failed to clear CloudSync full resync marker");
+                            Ok(()) => {
+                                scheduled.lock().unwrap().complete(&generation);
+                                return;
+                            }
+                            Err(error) => {
+                                tracing::warn!(%error, "failed to clear CloudSync full resync marker");
+                            }
                         }
-                        return;
-                    }
-                    Ok(_) if attempt < 2 => {
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     }
                     Ok(_) => {
-                        tracing::warn!("CloudSync full resync remains incomplete");
+                        tracing::warn!(?retry_delay, "CloudSync full resync remains incomplete");
+                    }
+                    Err(error) if error.is_transient() => {
+                        tracing::warn!(%error, ?retry_delay, "CloudSync full resync will retry");
                     }
                     Err(error) => {
-                        tracing::warn!(%error, "CloudSync full resync remains pending");
-                        return;
+                        let retry_after_restart = scheduled
+                            .lock()
+                            .unwrap()
+                            .handle_non_transient_error(&generation);
+                        if !retry_after_restart {
+                            tracing::warn!(%error, "CloudSync full resync remains pending");
+                            return;
+                        }
+                        retry_delay = CLOUDSYNC_FULL_RESYNC_MIN_RETRY_DELAY;
+                        tracing::warn!(%error, "CloudSync full resync will retry after reconfigure");
                     }
                 }
+
+                tokio::time::sleep(retry_delay).await;
+                retry_delay = retry_delay
+                    .saturating_mul(2)
+                    .min(CLOUDSYNC_FULL_RESYNC_MAX_RETRY_DELAY);
             }
         });
     }
@@ -931,6 +1012,19 @@ mod tests {
         assert!(!cloudsync_send_completed(
             &hypr_db_core::CloudsyncNetworkResult::default()
         ));
+    }
+
+    #[test]
+    fn full_resync_hands_off_reconfigure_without_retrying_after_suspend() {
+        let mut schedule = CloudsyncFullResyncSchedule::default();
+
+        assert!(schedule.claim("generation-1"));
+        assert!(!schedule.claim("generation-1"));
+        assert!(schedule.handle_non_transient_error("generation-1"));
+        assert!(schedule.is_active("generation-1"));
+
+        assert!(!schedule.handle_non_transient_error("generation-1"));
+        assert!(!schedule.is_active("generation-1"));
     }
 
     #[tokio::test]
