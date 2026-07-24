@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CloudAlertIcon,
   CloudCheckIcon,
+  HardDriveIcon,
   Loader2Icon,
   PauseIcon,
   RefreshCwIcon,
@@ -101,6 +102,8 @@ export function SyncStatusIndicator() {
   }
 
   const status = statusQuery.data;
+  const activityPaused = status?.activity_paused === true;
+  const deferredForCapture = status?.deferred_for_capture === true;
   const statusUnavailable = credentialBlock === null && statusQuery.isError;
   const view = (() => {
     switch (credentialBlock) {
@@ -165,6 +168,22 @@ export function SyncStatusIndicator() {
           status.last_error_kind === "transient"
             ? t`Anarlog will retry automatically. This does not affect your notes.`
             : (status.last_error ?? t`Anarlog will keep retrying`),
+      };
+    }
+
+    if (deferredForCapture) {
+      return {
+        kind: "deferred" as const,
+        label: t`Saved locally`,
+        description: t`Cloud sync resumes after this meeting finishes processing`,
+      };
+    }
+
+    if (activityPaused) {
+      return {
+        kind: "deferred" as const,
+        label: t`Saved locally`,
+        description: t`Cloud sync resumes when the current activity finishes`,
       };
     }
 
@@ -236,6 +255,7 @@ export function SyncStatusIndicator() {
           {view.kind === "syncing" && (
             <RefreshCwIcon className="size-4 animate-spin" />
           )}
+          {view.kind === "deferred" && <HardDriveIcon className="size-4" />}
           {view.kind === "synced" && <CloudCheckIcon className="size-4" />}
         </button>
       </DropdownMenuTrigger>
@@ -253,6 +273,7 @@ export function SyncStatusIndicator() {
           disabled={
             syncNowMutation.isPending ||
             statusQuery.isFetching ||
+            activityPaused ||
             (view.kind !== "synced" && !canRetry)
           }
           onSelect={() => {
