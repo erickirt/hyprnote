@@ -17,6 +17,11 @@ function renderAppSettings({
   cloudSyncAvailable = true,
   meetingDisclosureAutoPost = setting(),
   captureMeetingChat = setting(false),
+  microphoneDevice = {
+    value: "",
+    devices: ["External Microphone"],
+    onChange: vi.fn(),
+  },
 } = {}) {
   return {
     ...render(
@@ -37,6 +42,7 @@ function renderAppSettings({
         meetingDisclosureAutoPost={meetingDisclosureAutoPost}
         captureMeetingChat={captureMeetingChat}
         audioRetention={{ value: "forever", onChange: vi.fn() }}
+        microphoneDevice={microphoneDevice}
       />,
     ),
     meetingDisclosureAutoPost,
@@ -131,5 +137,28 @@ describe("AppSettingsView", () => {
     expect(
       screen.getByText(/A disclosure does not confirm participant consent/),
     ).toBeTruthy();
+  });
+
+  it("shows the microphone selector with the system default selected", () => {
+    renderAppSettings();
+
+    expect(screen.getByRole("combobox", { name: "Microphone" })).toBeTruthy();
+    expect(screen.getByText("Current default")).toBeTruthy();
+  });
+
+  it("shows when the selected microphone is unavailable and will fall back", () => {
+    renderAppSettings({
+      microphoneDevice: {
+        value: "Disconnected Microphone",
+        devices: ["External Microphone"],
+        onChange: vi.fn(),
+      },
+    });
+
+    expect(
+      screen.getByRole("combobox", { name: "Microphone" }).textContent,
+    ).toContain(
+      "Disconnected Microphone (Unavailable — using current default)",
+    );
   });
 });
