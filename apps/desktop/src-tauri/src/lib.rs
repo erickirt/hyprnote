@@ -23,9 +23,19 @@ const STAGING_BUNDLE_ID: &str = "com.hyprnote.staging";
 
 const APP_EXIT_REQUESTED_EVENT: &str = "app-exit-requested";
 static EXIT_FLUSH_COMPLETE: AtomicBool = AtomicBool::new(false);
+static EXIT_FLUSH_REQUESTED: AtomicBool = AtomicBool::new(false);
+const EXIT_FLUSH_FALLBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const EXIT_HARD_FALLBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
 
 fn mark_exit_flush_complete() {
     EXIT_FLUSH_COMPLETE.store(true, Ordering::SeqCst);
+}
+
+fn start_exit_hard_fallback() {
+    std::thread::spawn(|| {
+        std::thread::sleep(EXIT_HARD_FALLBACK_TIMEOUT);
+        std::process::exit(0);
+    });
 }
 
 fn should_force_quit() -> bool {
@@ -354,19 +364,27 @@ pub async fn main() {
             }
 
             api.prevent_exit();
+            let first_request = !EXIT_FLUSH_REQUESTED.swap(true, Ordering::SeqCst);
+            if first_request {
+                start_exit_hard_fallback();
+            }
             if app.emit_to("main", APP_EXIT_REQUESTED_EVENT, ()).is_err() {
                 mark_exit_flush_complete();
                 app.exit(0);
+            } else if first_request {
+                let app_handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(EXIT_FLUSH_FALLBACK_TIMEOUT).await;
+                    if !EXIT_FLUSH_COMPLETE.swap(true, Ordering::SeqCst) {
+                        tracing::warn!(
+                            "forcing app exit after frontend flush acknowledgement timed out"
+                        );
+                        app_handle.exit(0);
+                    }
+                });
             }
         }
         tauri::RunEvent::Exit => {
-            {
-                use tauri_plugin_store2::Store2PluginExt;
-                if let Ok(store) = app.store2().store() {
-                    let _ = store.save();
-                }
-            }
-
             if let Some(ref ctx) = root_supervisor_ctx_for_run {
                 ctx.mark_exiting();
                 ctx.stop();

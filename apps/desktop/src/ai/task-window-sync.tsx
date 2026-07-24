@@ -3,7 +3,8 @@ import { useEffect } from "react";
 
 import { getCurrentWebviewWindowLabel } from "@hypr/plugin-windows";
 
-import { getEnhancerService } from "~/services/enhancer";
+import { type EnhancerService, getEnhancerService } from "~/services/enhancer";
+import { id } from "~/shared/utils";
 import type { AITaskStore } from "~/store/zustand/ai-task";
 import type { RemoteTaskState, TaskState } from "~/store/zustand/ai-task/tasks";
 
@@ -11,6 +12,9 @@ const TASK_SYNC_EVENT = "hypr:ai-task-sync";
 const TASK_SYNC_REQUEST_EVENT = "hypr:ai-task-sync-request";
 const TASK_CANCEL_EVENT = "hypr:ai-task-cancel";
 const TASK_ENHANCE_EVENT = "hypr:ai-task-enhance";
+const TASK_AUTO_ENHANCE_REQUEST_EVENT = "hypr:ai-task-auto-enhance-request";
+const TASK_AUTO_ENHANCE_RESULT_EVENT = "hypr:ai-task-auto-enhance-result";
+export const MAIN_AUTO_ENHANCE_TIMEOUT_MS = 30_000;
 
 type TaskSyncPayload = {
   sourceLabel: string;
@@ -36,6 +40,31 @@ type TaskEnhancePayload = {
   };
 };
 
+type TaskAutoEnhanceRequestPayload = {
+  requestId: string;
+  sourceLabel: string;
+  sessionId: string;
+  mode: NonNullable<TaskEnhancePayload["auto"]>;
+};
+
+type TaskAutoEnhanceResultPayload = {
+  requestId: string;
+  completed: boolean;
+  error: string | null;
+};
+
+export async function handleMainEnhanceRequest(
+  service: Pick<EnhancerService, "enhance" | "requestAutoEnhance">,
+  { sessionId, auto, opts }: TaskEnhancePayload,
+) {
+  if (auto) {
+    await service.requestAutoEnhance(sessionId, auto);
+    return;
+  }
+
+  await service.enhance(sessionId, opts);
+}
+
 export function isMainAITaskHostWindow() {
   return getCurrentWebviewWindowLabel() === "main";
 }
@@ -58,12 +87,104 @@ export async function requestMainEnhance(
 
 export async function requestMainAutoEnhance(
   sessionId: string,
-  auto: NonNullable<TaskEnhancePayload["auto"]>,
-) {
-  await emitTo("main", TASK_ENHANCE_EVENT, {
-    sessionId,
-    auto,
-  } satisfies TaskEnhancePayload);
+  mode: NonNullable<TaskEnhancePayload["auto"]>,
+): Promise<void> {
+  const requestId = id();
+  const sourceLabel = getCurrentWebviewWindowLabel();
+
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let unlisten: UnlistenFn | null = null;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timeout !== null) clearTimeout(timeout);
+      unlisten?.();
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+
+    timeout = setTimeout(() => {
+      finish(
+        new Error(
+          "Main window did not acknowledge the auto-summary request in time",
+        ),
+      );
+    }, MAIN_AUTO_ENHANCE_TIMEOUT_MS);
+
+    void listen<TaskAutoEnhanceResultPayload>(
+      TASK_AUTO_ENHANCE_RESULT_EVENT,
+      (event) => {
+        if (
+          !isTaskAutoEnhanceResultPayload(event.payload) ||
+          event.payload.requestId !== requestId
+        ) {
+          return;
+        }
+
+        if (event.payload.error) {
+          finish(new Error(event.payload.error));
+        } else if (!event.payload.completed) {
+          finish(new Error("Main window did not schedule the auto-summary"));
+        } else {
+          finish();
+        }
+      },
+    ).then(
+      (stopListening) => {
+        if (settled) {
+          stopListening();
+          return;
+        }
+
+        unlisten = stopListening;
+        void emitTo("main", TASK_AUTO_ENHANCE_REQUEST_EVENT, {
+          requestId,
+          sourceLabel,
+          sessionId,
+          mode,
+        } satisfies TaskAutoEnhanceRequestPayload).catch((error) => {
+          finish(toError(error));
+        });
+      },
+      (error) => {
+        finish(toError(error));
+      },
+    );
+  });
+}
+
+export async function handleMainAutoEnhanceRequest(
+  service: Pick<EnhancerService, "requestAutoEnhance"> | null,
+  request: TaskAutoEnhanceRequestPayload,
+): Promise<void> {
+  let error: string | null = null;
+
+  try {
+    if (!service) {
+      throw new Error("Main auto-summary service is not ready");
+    }
+    await service.requestAutoEnhance(request.sessionId, request.mode);
+  } catch (cause) {
+    error = getErrorMessage(cause);
+  }
+
+  const result = {
+    requestId: request.requestId,
+    completed: error === null,
+    error,
+  } satisfies TaskAutoEnhanceResultPayload;
+
+  try {
+    await emitTo(request.sourceLabel, TASK_AUTO_ENHANCE_RESULT_EVENT, result);
+  } catch {
+    await emit(TASK_AUTO_ENHANCE_RESULT_EVENT, result);
+  }
 }
 
 export function AITaskWindowSyncBridge({ store }: { store: AITaskStore }) {
@@ -83,6 +204,7 @@ function MainAITaskWindowSyncBridge({ store }: { store: AITaskStore }) {
     let syncRequestUnlisten: UnlistenFn | null = null;
     let cancelUnlisten: UnlistenFn | null = null;
     let enhanceUnlisten: UnlistenFn | null = null;
+    let autoEnhanceRequestUnlisten: UnlistenFn | null = null;
 
     const emitSnapshot = () => {
       void emit(TASK_SYNC_EVENT, {
@@ -130,21 +252,13 @@ function MainAITaskWindowSyncBridge({ store }: { store: AITaskStore }) {
         return;
       }
 
-      const { sessionId, auto, opts } = event.payload;
       void (async () => {
         const service = getEnhancerService();
         if (!service) {
           return;
         }
 
-        if (auto === "regenerate") {
-          await service.resetEnhanceTasks(sessionId);
-          service.queueAutoEnhance(sessionId);
-        } else if (auto === "if_empty") {
-          await service.queueAutoEnhanceIfSummaryEmpty(sessionId);
-        } else {
-          await service.enhance(sessionId, opts);
-        }
+        await handleMainEnhanceRequest(service, event.payload);
       })().catch((error) => {
         console.error("[enhancer] remote enhancement failed", error);
       });
@@ -156,12 +270,45 @@ function MainAITaskWindowSyncBridge({ store }: { store: AITaskStore }) {
       }
     });
 
+    void listen<TaskAutoEnhanceRequestPayload>(
+      TASK_AUTO_ENHANCE_REQUEST_EVENT,
+      (event) => {
+        if (!active || !isTaskAutoEnhanceRequestPayload(event.payload)) {
+          return;
+        }
+
+        void handleMainAutoEnhanceRequest(
+          getEnhancerService(),
+          event.payload,
+        ).catch((error) => {
+          console.error(
+            "[enhancer] auto-summary acknowledgement failed",
+            error,
+          );
+        });
+      },
+    )
+      .then((unlisten) => {
+        if (active) {
+          autoEnhanceRequestUnlisten = unlisten;
+        } else {
+          unlisten();
+        }
+      })
+      .catch((error) => {
+        console.error(
+          "[enhancer] auto-summary bridge failed to initialize",
+          error,
+        );
+      });
+
     return () => {
       active = false;
       unsubscribe();
       syncRequestUnlisten?.();
       cancelUnlisten?.();
       enhanceUnlisten?.();
+      autoEnhanceRequestUnlisten?.();
     };
   }, [store]);
 
@@ -263,4 +410,47 @@ function isTaskEnhancePayload(payload: unknown): payload is TaskEnhancePayload {
 
   const candidate = payload as Partial<TaskEnhancePayload>;
   return typeof candidate.sessionId === "string";
+}
+
+function isTaskAutoEnhanceRequestPayload(
+  payload: unknown,
+): payload is TaskAutoEnhanceRequestPayload {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  const candidate = payload as Partial<TaskAutoEnhanceRequestPayload>;
+  return (
+    typeof candidate.requestId === "string" &&
+    candidate.requestId.length > 0 &&
+    typeof candidate.sourceLabel === "string" &&
+    candidate.sourceLabel.length > 0 &&
+    typeof candidate.sessionId === "string" &&
+    candidate.sessionId.length > 0 &&
+    (candidate.mode === "regenerate" || candidate.mode === "if_empty")
+  );
+}
+
+function isTaskAutoEnhanceResultPayload(
+  payload: unknown,
+): payload is TaskAutoEnhanceResultPayload {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  const candidate = payload as Partial<TaskAutoEnhanceResultPayload>;
+  return (
+    typeof candidate.requestId === "string" &&
+    candidate.requestId.length > 0 &&
+    typeof candidate.completed === "boolean" &&
+    (candidate.error === null || typeof candidate.error === "string")
+  );
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function toError(error: unknown) {
+  return error instanceof Error ? error : new Error(String(error));
 }
