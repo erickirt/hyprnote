@@ -26,7 +26,7 @@ import {
   DEFAULT_DESKTOP_SCHEME,
   desktopSchemeSchema,
 } from "@/functions/desktop-flow";
-import { getGitHubStats, getStargazers } from "@/functions/github";
+import { getGitHubStats } from "@/functions/github";
 import { useMountEffect } from "@/hooks/useMountEffect";
 import { appleIntelDownloadUrl, appleSiliconDownloadUrl } from "@/lib/download";
 import {
@@ -339,14 +339,10 @@ export const Route = createFileRoute("/")({
   },
   component: Component,
   loader: async () => {
-    const [githubStats, stargazers] = await Promise.all([
-      getGitHubStats(),
-      getStargazers(),
-    ]);
+    const githubStats = await getGitHubStats();
 
     return {
       githubStars: githubStats.stars ?? 8466,
-      githubStargazers: stargazers,
     };
   },
   head: () => ({
@@ -369,22 +365,26 @@ export const Route = createFileRoute("/")({
 });
 
 function Component() {
-  const { githubStars, githubStargazers } = Route.useLoaderData();
+  const { githubStars } = Route.useLoaderData();
   const formattedGithubStars = githubStars.toLocaleString("en-US");
 
   return (
     <main className="min-h-screen bg-white text-[#181613]">
-      <AnnouncementBanner />
-
       <div className="mx-auto w-full max-w-[700px] px-5 pt-4 pb-8 md:px-8 md:pt-4 md:pb-12">
         <div className="min-w-0 text-center">
           <section className="pt-10 pb-2 md:pt-12 md:pb-4">
-            <h1 className="font-hand mx-auto max-w-3xl text-5xl leading-[0.98] font-semibold tracking-normal text-balance md:text-7xl">
-              AI notepad for private meetings.
+            <h1 className="font-hand mx-auto max-w-3xl text-5xl leading-[0.98] font-semibold tracking-normal text-balance md:text-7xl lg:relative lg:left-1/2 lg:w-max lg:max-w-none lg:-translate-x-1/2 lg:whitespace-nowrap">
+              <span className="font-hand block lg:inline">Anarlog is</span>{" "}
+              <span className="font-hand block lg:inline">
+                the AI notepad for
+              </span>{" "}
+              <span className="font-hand block lg:inline">
+                private meetings.
+              </span>
             </h1>
             <p className="mx-auto mt-6 max-w-2xl text-lg leading-8 text-[#4f4940]">
-              Jot notes during the call. Anarlog turns them into an editable
-              summary.
+              Take bot-free, open-source meeting notes while keeping sensitive
+              conversations secure and under your control.
             </p>
             <div className="mt-8 flex flex-wrap justify-center gap-x-5 gap-y-3 text-sm">
               <DownloadButton />
@@ -397,10 +397,7 @@ function Component() {
 
           <TestimonialsSection />
 
-          <OpenSourceSection
-            formattedGithubStars={formattedGithubStars}
-            stargazers={githubStargazers}
-          />
+          <OpenSourceSection formattedGithubStars={formattedGithubStars} />
 
           <PricingSection />
 
@@ -608,20 +605,11 @@ function FinalCtaSection() {
   );
 }
 
-type GitHubStargazer = {
-  username: string;
-  avatar: string;
-};
-
 function OpenSourceSection({
   formattedGithubStars,
-  stargazers,
 }: {
   formattedGithubStars: string;
-  stargazers: GitHubStargazer[];
 }) {
-  const visibleStargazers = stargazers.slice(0, 24);
-
   return (
     <section
       className="relative left-1/2 w-screen max-w-[880px] -translate-x-1/2 py-12 md:py-14"
@@ -643,46 +631,12 @@ function OpenSourceSection({
           href="https://github.com/fastrepl/anarlog"
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-6 inline-flex items-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-medium text-neutral-900 transition-colors hover:border-neutral-400 hover:bg-neutral-100"
+          className="mt-6 inline-flex items-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-medium text-neutral-900 transition-colors hover:border-neutral-900 hover:bg-neutral-900 hover:text-white"
         >
           <Icon icon="mdi:github" width={18} height={18} aria-hidden="true" />
           <span>{formattedGithubStars} stars on GitHub</span>
         </a>
       </div>
-
-      {visibleStargazers.length > 0 && (
-        <div className="relative mt-8 overflow-hidden px-5 md:px-8">
-          <div
-            className="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 bg-linear-to-r from-white to-transparent md:w-20"
-            aria-hidden="true"
-          />
-          <div
-            className="pointer-events-none absolute inset-y-0 right-0 z-10 w-12 bg-linear-to-l from-white to-transparent md:w-20"
-            aria-hidden="true"
-          />
-          <div className="mx-auto grid max-w-[620px] grid-cols-6 gap-2 sm:grid-cols-12">
-            {visibleStargazers.map((stargazer) => (
-              <a
-                key={stargazer.username}
-                href={`https://github.com/${stargazer.username}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group aspect-square overflow-hidden rounded-[4px] border border-neutral-200 bg-neutral-100 transition-transform hover:-translate-y-0.5 hover:border-neutral-400"
-                aria-label={`${stargazer.username} on GitHub`}
-                title={stargazer.username}
-              >
-                <img
-                  src={stargazer.avatar}
-                  alt=""
-                  className="h-full w-full object-cover grayscale transition duration-200 group-hover:grayscale-0"
-                  loading="lazy"
-                  decoding="async"
-                />
-              </a>
-            ))}
-          </div>
-        </div>
-      )}
     </section>
   );
 }
@@ -1337,70 +1291,6 @@ function HeroWorkflowDemo() {
         aria-hidden="true"
       />
     </div>
-  );
-}
-
-function AnnouncementBanner() {
-  return (
-    <div className="flex justify-center px-5 pt-10 md:pt-12">
-      <a
-        href="https://char.com"
-        className="char-announcement group relative inline-flex h-8 w-[15.25rem] max-w-full items-center justify-center text-center text-sm font-medium text-[#181613] opacity-75 transition-opacity hover:opacity-100"
-        aria-label="Join the waitlist for Char"
-      >
-        <span className="char-announcement-text char-announcement-text-primary absolute inset-y-0 flex min-w-0 items-center justify-center px-8 whitespace-nowrap">
-          Join the waitlist for Char
-        </span>
-        <span className="char-announcement-text char-announcement-text-secondary absolute inset-y-0 flex min-w-0 items-center justify-center px-8 whitespace-nowrap">
-          We're innovating the todo list
-        </span>
-        <span
-          className="pointer-events-none absolute inset-0"
-          aria-hidden="true"
-        >
-          <CharBracket
-            side="left"
-            className="char-announcement-bracket char-announcement-bracket-left absolute top-1/2 left-1/2 h-5 text-[#181613]"
-          />
-          <CharBracket
-            side="right"
-            className="char-announcement-bracket char-announcement-bracket-right absolute top-1/2 left-1/2 h-5 text-[#181613]"
-          />
-        </span>
-      </a>
-    </div>
-  );
-}
-
-function CharBracket({
-  side,
-  className,
-}: {
-  side: "left" | "right";
-  className?: string;
-}) {
-  return (
-    <svg
-      width="8"
-      height="30"
-      viewBox="0 0 8 30"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden="true"
-    >
-      {side === "left" ? (
-        <path
-          d="M7.871 4.147C7.871 5.658 7.082 7.039 6.099 8.214C4.65 9.946 3.77 12.161 3.77 14.575C3.77 16.99 4.65 19.205 6.099 20.937C7.082 22.112 7.871 23.493 7.871 25.004V29.151H2.965V24.319C2.965 22.735 2.165 21.249 0.822 20.34L0 19.783V9.235L0.822 8.678C2.165 7.769 2.965 6.284 2.965 4.699V0L7.871 0V4.147Z"
-          fill="currentColor"
-        />
-      ) : (
-        <path
-          d="M0 4.147C0 5.658 0.789 7.039 1.773 8.214C3.221 9.946 4.101 12.161 4.101 14.575C4.101 16.99 3.221 19.205 1.773 20.937C0.789 22.112 0 23.493 0 25.004V29.151H4.907V24.319C4.907 22.735 5.706 21.249 7.049 20.34L7.871 19.783V9.235L7.049 8.678C5.706 7.769 4.907 6.284 4.907 4.699V0L0 0V4.147Z"
-          fill="currentColor"
-        />
-      )}
-    </svg>
   );
 }
 
