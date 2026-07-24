@@ -12,6 +12,7 @@ import {
 
 import {
   getSafeSharedNoteHref,
+  isMatchingSharedNoteAttachmentDownload,
   type SharedNoteAttachment,
   type SharedNoteAttachmentDownload,
   type SharedNoteNode,
@@ -24,16 +25,19 @@ export type SharedAttachmentResolver = (
 
 const AttachmentContext = createContext<{
   attachments: ReadonlyMap<string, SharedNoteAttachment>;
+  excluded: ReadonlySet<string>;
   resolve: SharedAttachmentResolver | null;
-}>({ attachments: new Map(), resolve: null });
+}>({ attachments: new Map(), excluded: new Set(), resolve: null });
 
 export function SharedNoteDocument({
   attachments,
   document,
+  excludedAttachmentIds = [],
   resolveAttachment,
 }: {
   attachments: SharedNoteAttachment[];
   document: SharedNoteNode;
+  excludedAttachmentIds?: readonly string[];
   resolveAttachment?: SharedAttachmentResolver;
 }) {
   const context = useMemo(
@@ -41,17 +45,22 @@ export function SharedNoteDocument({
       attachments: new Map(
         attachments.map((attachment) => [attachment.id, attachment]),
       ),
+      excluded: new Set(excludedAttachmentIds),
       resolve: resolveAttachment ?? null,
     }),
-    [attachments, resolveAttachment],
+    [attachments, excludedAttachmentIds, resolveAttachment],
   );
   const unreferencedAttachments = useMemo(() => {
     const referenced = collectSharedAttachmentIds(document);
-    return attachments.filter((attachment) => !referenced.has(attachment.id));
-  }, [attachments, document]);
+    const excluded = new Set(excludedAttachmentIds);
+    return attachments.filter(
+      (attachment) =>
+        !referenced.has(attachment.id) && !excluded.has(attachment.id),
+    );
+  }, [attachments, document, excludedAttachmentIds]);
   return (
     <AttachmentContext.Provider value={context}>
-      <div className="ProseMirror prosemirror-editor session-note-editor shared-note-document text-color">
+      <div className="ProseMirror prosemirror-editor session-note-editor shared-note-document text-color [&_li]:!text-base [&_li]:!leading-5 [&_p]:!text-base [&_p]:!leading-5">
         {renderChildren(document.content, "document")}
         {unreferencedAttachments.length > 0 ? (
           <section className="border-color-subtle mt-10 border-t pt-6">
@@ -118,10 +127,18 @@ function renderNode(node: SharedNoteNode, key: string): ReactNode {
     case "clip":
       return <SharedAttachmentNode key={key} node={node} />;
     case "bulletList":
-      return <ul key={key}>{children}</ul>;
+      return (
+        <ul key={key} className="list-disc pl-6">
+          {children}
+        </ul>
+      );
     case "orderedList":
       return (
-        <ol key={key} start={getIntegerAttr(node, "start", 1, 1_000_000, 1)}>
+        <ol
+          key={key}
+          className="list-decimal pl-6"
+          start={getIntegerAttr(node, "start", 1, 1_000_000, 1)}
+        >
           {children}
         </ol>
       );
@@ -189,7 +206,7 @@ function renderNode(node: SharedNoteNode, key: string): ReactNode {
 }
 
 function SharedAttachmentNode({ node }: { node: SharedNoteNode }) {
-  const { attachments, resolve } = useContext(AttachmentContext);
+  const { attachments, excluded, resolve } = useContext(AttachmentContext);
   const [pinnedAudioDownload, setPinnedAudioDownload] =
     useState<SharedNoteAttachmentDownload | null>(null);
   const [audioPlaying, setAudioPlaying] = useState(false);
@@ -207,7 +224,7 @@ function SharedAttachmentNode({ node }: { node: SharedNoteNode }) {
   const downloadQuery = useQuery({
     queryKey: ["shared-note-attachment-download", attachment?.id ?? ""],
     queryFn: ({ signal }) => resolve!(attachment!, signal),
-    enabled: Boolean(attachment && resolve),
+    enabled: Boolean(attachment && resolve && !excluded.has(attachment.id)),
     retry: false,
     staleTime: 45_000,
     refetchInterval: audioPlaying ? false : 45_000,
@@ -216,10 +233,14 @@ function SharedAttachmentNode({ node }: { node: SharedNoteNode }) {
   const download =
     !downloadQuery.error &&
     attachment &&
-    isMatchingDownload(attachment, downloadQuery.data)
+    isMatchingSharedNoteAttachmentDownload(attachment, downloadQuery.data)
       ? downloadQuery.data
       : null;
   const activeDownload = isAudio ? (pinnedAudioDownload ?? download) : download;
+
+  if (attachment && excluded.has(attachment.id)) {
+    return null;
+  }
 
   if (!attachment || !resolve || !activeDownload) {
     return (
@@ -255,7 +276,7 @@ function SharedAttachmentNode({ node }: { node: SharedNoteNode }) {
       const refreshed = await downloadQuery.refetch();
       if (
         refreshed.isError ||
-        !isMatchingDownload(attachment, refreshed.data)
+        !isMatchingSharedNoteAttachmentDownload(attachment, refreshed.data)
       ) {
         return;
       }
@@ -320,20 +341,6 @@ function SharedAttachmentNode({ node }: { node: SharedNoteNode }) {
         {formatFileSize(attachment.sizeBytes)}
       </span>
     </a>
-  );
-}
-
-function isMatchingDownload(
-  attachment: SharedNoteAttachment,
-  download: SharedNoteAttachmentDownload | null | undefined,
-): download is SharedNoteAttachmentDownload {
-  return Boolean(
-    download &&
-    download.id === attachment.id &&
-    download.filename === attachment.filename &&
-    download.contentType === attachment.contentType &&
-    download.sizeBytes === attachment.sizeBytes &&
-    download.sha256 === attachment.sha256,
   );
 }
 
