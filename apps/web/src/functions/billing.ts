@@ -29,7 +29,24 @@ type SupabaseClient = ReturnType<typeof getSupabaseServerClient>;
 type AuthUser = {
   id: string;
   email?: string | null;
+  user_metadata?: {
+    full_name?: unknown;
+    name?: unknown;
+  };
 };
+
+function getAuthUserName(user: AuthUser) {
+  for (const value of [
+    user.user_metadata?.full_name,
+    user.user_metadata?.name,
+  ]) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return undefined;
+}
 
 class TrialCheckoutCreationError extends Error {
   constructor(readonly checkoutError: unknown) {
@@ -71,10 +88,18 @@ const getStripeCustomerIdForUser = async (
     throw new Error("Stripe customer does not belong to authenticated user");
   }
 
+  const updates: Stripe.CustomerUpdateParams = {};
   if (ownership === "claimable") {
-    await stripe.customers.update(stripeCustomerId, {
-      metadata: { userId: user.id },
-    });
+    updates.metadata = { userId: user.id };
+  }
+
+  const name = getAuthUserName(user);
+  if (!customer.name && name) {
+    updates.name = name;
+  }
+
+  if (Object.keys(updates).length > 0) {
+    await stripe.customers.update(stripeCustomerId, updates);
   }
 
   return stripeCustomerId;
@@ -133,6 +158,7 @@ async function ensureStripeCustomerId(
   const newCustomer = await stripe.customers.create(
     {
       email: user.email ?? undefined,
+      name: getAuthUserName(user),
       metadata: {
         userId: user.id,
         posthog_person_distinct_id: user.id,
@@ -357,7 +383,7 @@ export const createCheckoutSession = createServerFn({ method: "POST" })
       const stripeCustomerId = await getStripeCustomerIdForUser(
         supabase,
         stripe,
-        { id: user.id, email: user.email },
+        user,
       );
 
       if (stripeCustomerId) {
@@ -382,10 +408,7 @@ export const createCheckoutSession = createServerFn({ method: "POST" })
 
       return await createCheckoutUrl({
         supabase,
-        user: {
-          id: user.id,
-          email: user.email,
-        },
+        user,
         period: data.period,
         scheme: data.scheme,
         trial: data.trial,
@@ -447,16 +470,13 @@ export const createPlanSwitchSession = createServerFn({ method: "POST" })
     const stripeCustomerId = await getStripeCustomerIdForUser(
       supabase,
       stripe,
-      { id: user.id, email: user.email },
+      user,
     );
 
     if (!stripeCustomerId) {
       return createCheckoutUrl({
         supabase,
-        user: {
-          id: user.id,
-          email: user.email,
-        },
+        user,
         period: data.targetPeriod,
         scheme: data.scheme,
       });
@@ -470,10 +490,7 @@ export const createPlanSwitchSession = createServerFn({ method: "POST" })
     if (!activeSubscription) {
       return createCheckoutUrl({
         supabase,
-        user: {
-          id: user.id,
-          email: user.email,
-        },
+        user,
         period: data.targetPeriod,
         scheme: data.scheme,
       });
@@ -482,10 +499,7 @@ export const createPlanSwitchSession = createServerFn({ method: "POST" })
     if (!activeSubscription.items.data[0]) {
       return createCheckoutUrl({
         supabase,
-        user: {
-          id: user.id,
-          email: user.email,
-        },
+        user,
         period: data.targetPeriod,
         scheme: data.scheme,
       });
@@ -538,7 +552,7 @@ export const createPortalSession = createServerFn({ method: "POST" })
     const stripeCustomerId = await getStripeCustomerIdForUser(
       supabase,
       stripe,
-      { id: user.id, email: user.email },
+      user,
     );
 
     if (!stripeCustomerId) {
@@ -568,7 +582,7 @@ export const syncAfterSuccess = createServerFn({ method: "POST" }).handler(
     const stripeCustomerId = await getStripeCustomerIdForUser(
       supabase,
       stripe,
-      { id: user.id, email: user.email },
+      user,
     );
 
     if (!stripeCustomerId) {
