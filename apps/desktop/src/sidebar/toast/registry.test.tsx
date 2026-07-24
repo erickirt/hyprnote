@@ -42,7 +42,7 @@ describe("sidebar toast registry", () => {
     expect(toast?.primaryAction?.label).toBe("Add");
   });
 
-  it("keeps the missing transcription model message short", () => {
+  it("keeps the missing transcription provider message short", () => {
     const toast = getToastToShow(
       createToastRegistry({
         ...baseParams,
@@ -52,8 +52,62 @@ describe("sidebar toast registry", () => {
     );
 
     expect(toast?.id).toBe("missing-stt");
-    expect(toast?.description).toBe("Transcription model needed");
+    expect(toast?.description).toBe("Transcription provider needed");
     expect(toast?.primaryAction?.label).toBe("Add");
+  });
+
+  it("suggests signing in before provider setup", () => {
+    const toast = getToastToShow(
+      createToastRegistry({
+        ...baseParams,
+        isAuthenticated: false,
+        hasLLMConfigured: false,
+        hasSttConfigured: false,
+      }),
+      () => false,
+    );
+
+    expect(toast?.id).toBe("sign-in-benefits");
+    expect(toast?.description).toBe("Sign in to get the most out of Anarlog");
+    expect(toast?.primaryAction?.label).toBe("Sign in");
+  });
+
+  it("asks for a usable transcription provider after sign-in is dismissed", () => {
+    const toast = getToastToShow(
+      createToastRegistry({
+        ...baseParams,
+        isAuthenticated: false,
+        hasProSttConfigured: true,
+      }),
+      (id) => id === "sign-in-benefits",
+    );
+
+    expect(toast?.id).toBe("missing-stt");
+    expect(toast?.description).toBe("Transcription provider needed");
+  });
+
+  it("keeps Pro providers usable while authentication is loading", () => {
+    const proSttToast = getToastToShow(
+      createToastRegistry({
+        ...baseParams,
+        isAuthenticated: false,
+        isAuthLoading: true,
+        hasProSttConfigured: true,
+      }),
+      () => false,
+    );
+    const proLlmToast = getToastToShow(
+      createToastRegistry({
+        ...baseParams,
+        isAuthenticated: false,
+        isAuthLoading: true,
+        hasProLlmConfigured: true,
+      }),
+      () => false,
+    );
+
+    expect(proSttToast).toBeNull();
+    expect(proLlmToast).toBeNull();
   });
 
   it("hides local STT loading while the active transcript tab shows batch progress", () => {
@@ -105,7 +159,7 @@ describe("sidebar toast registry", () => {
         ...baseParams,
         isAuthenticated: false,
       }),
-      () => false,
+      (id) => id === "sign-in-benefits",
     );
     const previewToast = createDevtoolsToastPreview({
       preview: "pro",
@@ -137,6 +191,15 @@ describe("sidebar toast registry", () => {
     expect(languageModelToast.id).toBe("devtools-missing-llm");
     expect(languageModelToast.description).toBe("Language model needed");
     expect(languageModelToast.primaryAction?.label).toBe("Add");
+    const transcriptionModelToast = createDevtoolsToastPreview({
+      preview: "transcription-model",
+      onSignIn: vi.fn(),
+      onOpenLLMSettings: vi.fn(),
+      onOpenSTTSettings: vi.fn(),
+    });
+    expect(transcriptionModelToast.description).toBe(
+      "Transcription provider needed",
+    );
     expect(downloadToast.id).toBe("devtools-downloading-model");
     expect(downloadToast.loading).toBe(true);
   });
