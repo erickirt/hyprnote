@@ -99,6 +99,8 @@ vi.mock("@hypr/plugin-db", () => ({
   listMeetings: vi.fn(),
   subscribe: vi.fn().mockResolvedValue(() => Promise.resolve()),
   suspendCloudsync: vi.fn().mockResolvedValue(undefined),
+  suspendCloudsyncAfterAuthLoss: vi.fn().mockResolvedValue(undefined),
+  suspendCloudsyncForSignOut: vi.fn().mockResolvedValue(undefined),
 }));
 
 function translate(
