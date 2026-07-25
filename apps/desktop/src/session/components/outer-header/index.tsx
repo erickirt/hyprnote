@@ -5,8 +5,9 @@ import {
   SquareIcon,
   VideoIcon,
 } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useRef, useState } from "react";
 
+import { commands as deeplinkCommands } from "@hypr/plugin-deeplink2";
 import { commands as openerCommands } from "@hypr/plugin-opener2";
 import { cn, safeParseDate } from "@hypr/utils";
 
@@ -17,7 +18,10 @@ import { OverflowButton } from "./overflow";
 import { useAudioPlayer } from "~/audio-player";
 import { useNow } from "~/calendar/hooks";
 import { useShell } from "~/contexts/shell";
-import { WELCOME_NOTE_TRACKING_ID } from "~/onboarding/welcome-note.constants";
+import {
+  buildWelcomeNoteDemoUrl,
+  WELCOME_NOTE_TRACKING_ID,
+} from "~/onboarding/welcome-note.constants";
 import { SessionShareButton } from "~/session-sharing";
 import { useEventCountdown } from "~/session/hooks/useEventCountdown";
 import {
@@ -26,6 +30,7 @@ import {
 } from "~/session/hooks/useRemoteMeeting";
 import { useSessionEvent } from "~/session/hooks/useSessionEvent";
 import { useConfigValue } from "~/shared/config";
+import { getScheme } from "~/shared/utils";
 import type { EditorView } from "~/store/zustand/tabs/schema";
 import { useListener } from "~/stt/contexts";
 import { useStartListening } from "~/stt/useStartListening";
@@ -159,27 +164,68 @@ function HeaderMeetingActionPill({
   const { audioExists } = useAudioPlayer();
   const canResume = audioExists || hasTranscript;
   const { t } = useLingui();
-  const start = useCallback(() => {
+  const joiningMeetingRef = useRef(false);
+  const [joiningMeeting, setJoiningMeeting] = useState(false);
+  const start = useCallback(async () => {
     if (!isMainWebviewWindow()) {
-      void requestMainListenerControl("start", sessionId);
+      await requestMainListenerControl("start", sessionId);
       return;
     }
 
-    void startListening();
+    await startListening();
   }, [sessionId, startListening]);
+  const openMeeting = useCallback(async () => {
+    if (!meetingLink) {
+      return;
+    }
+
+    let url = meetingLink;
+    if (event?.tracking_id === WELCOME_NOTE_TRACKING_ID) {
+      try {
+        const scheme = await getScheme();
+        const result = await deeplinkCommands.startCallbackServer(scheme);
+        if (result.status === "ok") {
+          url = buildWelcomeNoteDemoUrl(meetingLink, result.data);
+        }
+      } catch (error) {
+        console.error(
+          "[onboarding] failed to prepare demo completion callback",
+          error,
+        );
+      }
+    }
+
+    void openerCommands.openUrl(url, null);
+  }, [event?.tracking_id, meetingLink]);
+  const joinMeeting = useCallback(async () => {
+    if (joiningMeetingRef.current) {
+      return;
+    }
+
+    joiningMeetingRef.current = true;
+    setJoiningMeeting(true);
+    try {
+      await Promise.all([openMeeting(), start()]);
+    } finally {
+      joiningMeetingRef.current = false;
+      setJoiningMeeting(false);
+    }
+  }, [openMeeting, start]);
   const handleCountdownExpire = useCallback(() => {
     if (!autoStartScheduledMeetings || !canStartLiveSession) {
       return;
     }
 
     if (autoJoinScheduledMeetings && meetingLink) {
-      void openerCommands.openUrl(meetingLink, null);
+      void joinMeeting();
+    } else {
+      void start();
     }
-    start();
   }, [
     autoJoinScheduledMeetings,
     autoStartScheduledMeetings,
     canStartLiveSession,
+    joinMeeting,
     meetingLink,
     start,
   ]);
@@ -226,8 +272,7 @@ function HeaderMeetingActionPill({
             getMeetingDisplay(remote.type).icon
           ) : undefined,
         onClick: () => {
-          void openerCommands.openUrl(meetingLink, null);
-          start();
+          void joinMeeting();
         },
       };
     }
@@ -248,7 +293,7 @@ function HeaderMeetingActionPill({
       onClick: start,
     };
   })();
-  const disabled = sessionMode === "finalizing";
+  const disabled = sessionMode === "finalizing" || joiningMeeting;
   const showCountdown =
     Boolean(countdown.label) &&
     sessionMode !== "active" &&
