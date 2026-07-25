@@ -34,7 +34,10 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("@hypr/editor/markdown", () => ({
-  parseJsonContent: (value: string) => JSON.parse(value),
+  parseJsonContent: (value: string) =>
+    value
+      ? JSON.parse(value)
+      : { type: "doc", content: [{ type: "paragraph" }] },
 }));
 
 vi.mock("@hypr/editor/note", () => ({
@@ -223,6 +226,171 @@ describe("EnhancedEditor", () => {
     expect(hoisted.persistContent).toHaveBeenCalledWith(
       JSON.stringify(input),
       "Edited title",
+    );
+  });
+
+  it("does not persist the empty title layout for a new summary", () => {
+    hoisted.content = "";
+    hoisted.sessionTitle = "";
+
+    render(
+      <EnhancedEditor
+        sessionId="session-1"
+        enhancedNoteId="note-1"
+        content={hoisted.content}
+      />,
+    );
+
+    const props = hoisted.noteEditorProps[hoisted.noteEditorProps.length - 1];
+    const input = {
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 1 } },
+        { type: "paragraph" },
+      ],
+    };
+
+    (props?.handleChange as (input: unknown) => void)(input);
+
+    expect(hoisted.persistContent).not.toHaveBeenCalled();
+  });
+
+  it("does not persist a synthesized session title for a new summary", () => {
+    hoisted.content = "";
+    hoisted.sessionTitle = "Weekly sync";
+
+    render(
+      <EnhancedEditor
+        sessionId="session-1"
+        enhancedNoteId="note-1"
+        content={hoisted.content}
+      />,
+    );
+
+    const props = hoisted.noteEditorProps[hoisted.noteEditorProps.length - 1];
+    const input = {
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 1 },
+          content: [{ type: "text", text: "Weekly sync" }],
+        },
+        { type: "paragraph" },
+      ],
+    };
+
+    (props?.handleChange as (input: unknown) => void)(input);
+
+    expect(hoisted.persistContent).not.toHaveBeenCalled();
+  });
+
+  it("persists formatting applied to a synthesized session title", () => {
+    hoisted.content = "";
+    hoisted.sessionTitle = "Weekly sync";
+
+    render(
+      <EnhancedEditor
+        sessionId="session-1"
+        enhancedNoteId="note-1"
+        content={hoisted.content}
+      />,
+    );
+
+    const props = hoisted.noteEditorProps[hoisted.noteEditorProps.length - 1];
+    const input = {
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 1 },
+          content: [
+            {
+              type: "text",
+              text: "Weekly sync",
+              marks: [{ type: "bold" }],
+            },
+          ],
+        },
+        { type: "paragraph" },
+      ],
+    };
+
+    (props?.handleChange as (input: unknown) => void)(input);
+
+    expect(hoisted.persistContent).toHaveBeenCalledWith(
+      JSON.stringify(input),
+      "Weekly sync",
+    );
+  });
+
+  it("persists clearing an existing summary", () => {
+    hoisted.content = JSON.stringify({
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 1 },
+          content: [{ type: "text", text: "Existing summary" }],
+        },
+      ],
+    });
+    hoisted.sessionTitle = "";
+
+    render(
+      <EnhancedEditor
+        sessionId="session-1"
+        enhancedNoteId="note-1"
+        content={hoisted.content}
+      />,
+    );
+
+    const props = hoisted.noteEditorProps[hoisted.noteEditorProps.length - 1];
+    const input = {
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 1 } },
+        { type: "paragraph" },
+      ],
+    };
+
+    (props?.handleChange as (input: unknown) => void)(input);
+
+    expect(hoisted.persistContent).toHaveBeenCalledWith(
+      JSON.stringify(input),
+      "",
+    );
+  });
+
+  it("persists an attachment added to a new summary", () => {
+    hoisted.content = "";
+    hoisted.sessionTitle = "";
+
+    render(
+      <EnhancedEditor
+        sessionId="session-1"
+        enhancedNoteId="note-1"
+        content={hoisted.content}
+      />,
+    );
+
+    const props = hoisted.noteEditorProps[hoisted.noteEditorProps.length - 1];
+    const input = {
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 1 } },
+        {
+          type: "fileAttachment",
+          attrs: { attachmentId: "attachment-1", name: "notes.pdf" },
+        },
+      ],
+    };
+
+    (props?.handleChange as (input: unknown) => void)(input);
+
+    expect(hoisted.persistContent).toHaveBeenCalledWith(
+      JSON.stringify(input),
+      undefined,
     );
   });
 

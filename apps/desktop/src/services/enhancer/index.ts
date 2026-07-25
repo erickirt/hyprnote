@@ -65,21 +65,44 @@ const UUID_TITLE_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ISO_TITLE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
 const PENDING_AUTO_ENHANCE_RECOVERY_INTERVAL_MS = 5_000;
+const TEXT_CONTAINER_TYPES = new Set([
+  "doc",
+  "heading",
+  "paragraph",
+  "text",
+  "codeBlock",
+  "blockquote",
+  "bulletList",
+  "orderedList",
+  "listItem",
+]);
 
 type TiptapNode = {
+  type?: string;
+  attrs?: Record<string, unknown>;
   content?: TiptapNode[];
+  marks?: Array<{ type?: string; attrs?: Record<string, unknown> }>;
   text?: string;
 };
 
-function hasTiptapText(node: TiptapNode): boolean {
+function hasMeaningfulTiptapContent(node: TiptapNode): boolean {
   if (typeof node.text === "string" && node.text.trim()) {
     return true;
   }
 
-  return node.content?.some(hasTiptapText) ?? false;
+  if (!node.type || !TEXT_CONTAINER_TYPES.has(node.type)) {
+    return true;
+  }
+
+  return node.content?.some(hasMeaningfulTiptapContent) ?? false;
 }
 
-function hasSummaryContent(value: unknown): boolean {
+function collectTiptapText(node: TiptapNode): string {
+  const text = typeof node.text === "string" ? node.text : "";
+  return text + (node.content?.map(collectTiptapText).join("") ?? "");
+}
+
+function hasSummaryContent(value: unknown, sessionTitle?: string): boolean {
   if (typeof value !== "string") {
     return false;
   }
@@ -100,7 +123,25 @@ function hasSummaryContent(value: unknown): boolean {
       parsed !== null &&
       (parsed as { type?: unknown }).type === "doc"
     ) {
-      return hasTiptapText(parsed);
+      const document = parsed as TiptapNode;
+      const blocks = document.content ?? [];
+      const firstBlock = blocks[0];
+      const firstBlockAttrs = firstBlock?.attrs ?? {};
+      const synthesizedTitle =
+        sessionTitle?.trim() &&
+        firstBlock?.type === "heading" &&
+        firstBlockAttrs.level === 1 &&
+        Object.keys(firstBlockAttrs).length === 1 &&
+        collectTiptapText(firstBlock).trim() === sessionTitle.trim() &&
+        !firstBlock.content?.some(
+          (child) =>
+            child.type !== "text" ||
+            !child.text?.trim() ||
+            Boolean(child.marks?.length),
+        );
+      return (synthesizedTitle ? blocks.slice(1) : blocks).some(
+        hasMeaningfulTiptapContent,
+      );
     }
     return true;
   } catch {
@@ -224,7 +265,10 @@ export class EnhancerService {
       const templateId = this.deps.getSelectedTemplateId();
       const existingNote = getAutoEnhancedNote(snapshot, templateId);
 
-      if (existingNote && hasSummaryContent(existingNote.content)) {
+      if (
+        existingNote &&
+        hasSummaryContent(existingNote.content, snapshot.title)
+      ) {
         return { type: "summary_exists", noteId: existingNote.id };
       }
 
@@ -449,7 +493,10 @@ export class EnhancerService {
       };
     }
 
-    if (existingTask?.status === "success" && hasSummaryContent(note.content)) {
+    if (
+      existingTask?.status === "success" &&
+      hasSummaryContent(note.content, snapshot.title)
+    ) {
       return { type: "already_active", noteId: note.id };
     }
 

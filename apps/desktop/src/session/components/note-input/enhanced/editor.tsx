@@ -32,6 +32,34 @@ import {
 
 const extraNodeViews = { appLink: AppLinkView, session: SessionNodeView };
 
+function isCanonicalEmptyDocument(
+  content: JSONContent,
+  sessionTitle: string,
+): boolean {
+  const [title, body, ...rest] = content.content ?? [];
+  const expectedTitle = sessionTitle.trim();
+  const titleContent = title?.content ?? [];
+  const titleAttrs = title?.attrs ?? {};
+  const bodyAttrs = body?.attrs ?? {};
+  const hasExpectedTitle = expectedTitle
+    ? titleContent.length === 1 &&
+      titleContent[0]?.type === "text" &&
+      titleContent[0].text === expectedTitle &&
+      !titleContent[0].marks?.length
+    : titleContent.length === 0;
+  return (
+    content.type === "doc" &&
+    rest.length === 0 &&
+    title?.type === "heading" &&
+    titleAttrs.level === 1 &&
+    Object.keys(titleAttrs).length === 1 &&
+    hasExpectedTitle &&
+    body?.type === "paragraph" &&
+    Object.keys(bodyAttrs).length === 0 &&
+    !body.content?.length
+  );
+}
+
 const EnhancedEditorInner = forwardRef<
   NoteEditorRef,
   {
@@ -82,6 +110,12 @@ const EnhancedEditorInner = forwardRef<
     const handleChange = useCallback(
       (input: JSONContent) => {
         const portableInput = normalizePortableAttachmentUrls(input);
+        if (
+          content === "" &&
+          isCanonicalEmptyDocument(portableInput, sessionTitle)
+        ) {
+          return;
+        }
         const title = extractFirstLineTitle(portableInput);
         const nextTitle =
           title !== null || hasStoredNoteContent(content)
@@ -93,7 +127,7 @@ const EnhancedEditorInner = forwardRef<
           },
         );
       },
-      [content, updateContent],
+      [content, sessionTitle, updateContent],
     );
 
     const mentionConfig = useMentionConfig();
