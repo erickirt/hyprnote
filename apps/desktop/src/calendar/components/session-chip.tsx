@@ -1,3 +1,5 @@
+import { useLingui } from "@lingui/react/macro";
+import { platform } from "@tauri-apps/plugin-os";
 import { format } from "date-fns";
 import { useCallback, useMemo } from "react";
 
@@ -29,6 +31,7 @@ export function SessionChip({
   sessionId: string;
   session: TimelineSessionRow | undefined;
 }) {
+  const { t } = useLingui();
   const tz = useTimezone();
   const deleteSession = useDeleteSession();
   const title = session?.title ?? undefined;
@@ -37,7 +40,7 @@ export function SessionChip({
     ? format(toTz(session.created_at, tz), "h:mm a")
     : null;
 
-  const handleShowInFinder = useCallback(async () => {
+  const handleShowInFolder = useCallback(async () => {
     const result = await fsSyncCommands.sessionDir(sessionId);
     if (result.status === "ok") {
       await openerCommands.openPath(result.data, null);
@@ -56,8 +59,8 @@ export function SessionChip({
     () => [
       {
         id: "show",
-        text: "Show in Finder",
-        action: handleShowInFinder,
+        text: platform() === "macos" ? t`Show in Finder` : t`Show in folder`,
+        action: handleShowInFolder,
       },
       { separator: true },
       {
@@ -66,7 +69,7 @@ export function SessionChip({
         action: handleDelete,
       },
     ],
-    [handleShowInFinder, handleDelete],
+    [t, handleShowInFolder, handleDelete],
   );
   const showContextMenu = useNativeContextMenu(contextMenu);
 

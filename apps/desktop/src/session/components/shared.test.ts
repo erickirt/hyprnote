@@ -7,6 +7,7 @@ import {
   useCanShowTranscript,
   useCurrentNoteHasContent,
   useCurrentNoteTab,
+  useListenButtonState,
 } from "./shared";
 
 import type { Tab } from "~/store/zustand/tabs/schema";
@@ -19,6 +20,9 @@ const hoisted = vi.hoisted(() => ({
   rawMd: "",
   enhancedContent: "",
   liveSegments: [] as unknown[],
+  liveLastError: null as string | null,
+  liveLastErrorSessionId: null as string | null,
+  liveLastErrorIsAudioRelated: false,
   liveSessionId: null as string | null,
   sessionMode: "inactive",
 }));
@@ -28,6 +32,9 @@ vi.mock("~/stt/contexts", () => ({
     selector: (state: {
       batch: Record<string, { error: string | null } | undefined>;
       live: {
+        lastError: string | null;
+        lastErrorSessionId: string | null;
+        lastErrorIsAudioRelated: boolean;
         sessionId: string | null;
         finalizingBySession: Record<string, unknown>;
       };
@@ -38,6 +45,9 @@ vi.mock("~/stt/contexts", () => ({
     selector({
       batch: { "session-1": { error: hoisted.batchError } },
       live: {
+        lastError: hoisted.liveLastError,
+        lastErrorSessionId: hoisted.liveLastErrorSessionId,
+        lastErrorIsAudioRelated: hoisted.liveLastErrorIsAudioRelated,
         sessionId: hoisted.liveSessionId,
         finalizingBySession: hoisted.finalizingBySession,
       },
@@ -68,6 +78,9 @@ describe("useCurrentNoteTab", () => {
     hoisted.rawMd = "";
     hoisted.enhancedContent = "";
     hoisted.liveSegments = [];
+    hoisted.liveLastError = null;
+    hoisted.liveLastErrorSessionId = null;
+    hoisted.liveLastErrorIsAudioRelated = false;
     hoisted.liveSessionId = null;
     hoisted.sessionMode = "inactive";
   });
@@ -104,6 +117,72 @@ describe("useCurrentNoteTab", () => {
     );
 
     expect(result.current).toEqual({ type: "transcript" });
+  });
+});
+
+describe("useListenButtonState", () => {
+  beforeEach(() => {
+    hoisted.liveLastError = null;
+    hoisted.liveLastErrorSessionId = null;
+    hoisted.liveLastErrorIsAudioRelated = false;
+    hoisted.sessionMode = "inactive";
+  });
+
+  it("routes capture failures to audio capability settings", () => {
+    hoisted.liveLastError = "microphone unavailable";
+    hoisted.liveLastErrorSessionId = "session-1";
+    hoisted.liveLastErrorIsAudioRelated = true;
+
+    const { result } = renderHook(() => useListenButtonState("session-1"));
+
+    expect(result.current).toEqual({
+      shouldRender: true,
+      isDisabled: false,
+      warningMessage: "Session failed: microphone unavailable",
+      recoverySettingsTab: "permissions",
+    });
+  });
+
+  it("does not route transcription failures to audio settings", () => {
+    hoisted.liveLastError = "transcription connection closed";
+    hoisted.liveLastErrorSessionId = "session-1";
+
+    const { result } = renderHook(() => useListenButtonState("session-1"));
+
+    expect(result.current).toEqual({
+      shouldRender: true,
+      isDisabled: false,
+      warningMessage: "Session failed: transcription connection closed",
+      recoverySettingsTab: null,
+    });
+  });
+
+  it("does not show another session's capture failure", () => {
+    hoisted.liveLastError = "microphone unavailable";
+    hoisted.liveLastErrorSessionId = "session-2";
+    hoisted.liveLastErrorIsAudioRelated = true;
+
+    const { result } = renderHook(() => useListenButtonState("session-1"));
+
+    expect(result.current).toEqual({
+      shouldRender: true,
+      isDisabled: false,
+      warningMessage: "",
+      recoverySettingsTab: null,
+    });
+  });
+
+  it("does not offer audio configuration for batch progress", () => {
+    hoisted.sessionMode = "running_batch";
+
+    const { result } = renderHook(() => useListenButtonState("session-1"));
+
+    expect(result.current).toEqual({
+      shouldRender: true,
+      isDisabled: true,
+      warningMessage: "Batch transcription in progress.",
+      recoverySettingsTab: null,
+    });
   });
 });
 

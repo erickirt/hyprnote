@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { arch, platform } from "@tauri-apps/plugin-os";
 import {
   type ReactNode,
   useCallback,
@@ -26,14 +27,15 @@ import { useAuth } from "./auth-context";
 import { type BillingAccess, BillingContext } from "./billing-context";
 
 import { setSettingValues } from "~/settings/queries";
-import { useConfigValue } from "~/shared/config";
+import { useConfigValues } from "~/shared/config";
+import { getUnsupportedDesktopLocalSttRepair } from "~/stt/capabilities";
 
 async function getClaimsFromToken(
   accessToken: string,
 ): Promise<SupabaseJwtPayload | null> {
   const result = await authCommands.decodeClaims(accessToken);
   if (result.status === "error") {
-    return null;
+    throw new Error(result.error);
   }
   return {
     sub: result.data.sub,
@@ -68,7 +70,15 @@ function markSeen(key: string): void {
 
 export function BillingProvider({ children }: { children: ReactNode }) {
   const auth = useAuth();
-  const currentLlmProvider = useConfigValue("current_llm_provider");
+  const {
+    current_llm_provider: currentLlmProvider,
+    current_stt_provider: currentSttProvider,
+    current_stt_model: currentSttModel,
+  } = useConfigValues([
+    "current_llm_provider",
+    "current_stt_provider",
+    "current_stt_model",
+  ] as const);
 
   const claimsQuery = useQuery({
     queryKey: ["tokenInfo", auth?.session?.access_token ?? ""],
@@ -80,6 +90,8 @@ export function BillingProvider({ children }: { children: ReactNode }) {
 
   const billing = deriveBillingInfo(claimsQuery.data ?? null);
   const isReady = !claimsQuery.isPending && !claimsQuery.isError;
+  const claimsAreCurrent =
+    !claimsQuery.isFetching && !claimsQuery.isPlaceholderData;
 
   // eslint-disable-next-line @tanstack/query/exhaustive-deps -- Auth supplies request headers; the user ID is the eligibility identity.
   const canTrialQuery = useQuery({
@@ -165,7 +177,12 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!auth?.session?.user.id || !isReady || billing.isPaid) {
+    if (
+      !auth?.session?.user.id ||
+      !isReady ||
+      !claimsAreCurrent ||
+      billing.isPaid
+    ) {
       return;
     }
 
@@ -177,7 +194,45 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       current_llm_provider: "",
       current_llm_model: "",
     });
-  }, [auth?.session?.user.id, billing.isPaid, currentLlmProvider, isReady]);
+  }, [
+    auth?.session?.user.id,
+    billing.isPaid,
+    claimsAreCurrent,
+    currentLlmProvider,
+    isReady,
+  ]);
+
+  useEffect(() => {
+    if (
+      auth.session === undefined ||
+      (auth.session !== null && (!isReady || !claimsAreCurrent))
+    ) {
+      return;
+    }
+
+    const repair = getUnsupportedDesktopLocalSttRepair(
+      platform(),
+      arch(),
+      currentSttProvider,
+      currentSttModel,
+      isReady && billing.isPaid && !!auth?.session,
+    );
+    if (!repair) {
+      return;
+    }
+
+    void setSettingValues({
+      current_stt_provider: repair.provider,
+      current_stt_model: repair.model,
+    });
+  }, [
+    auth.session,
+    billing.isPaid,
+    claimsAreCurrent,
+    currentSttModel,
+    currentSttProvider,
+    isReady,
+  ]);
 
   const prevIsPaidRef = useRef(billing.isPaid);
   useEffect(() => {

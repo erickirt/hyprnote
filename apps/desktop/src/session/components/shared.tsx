@@ -125,6 +125,12 @@ export function RecordingIcon() {
 export function useListenButtonState(sessionId: string) {
   const sessionMode = useListener((state) => state.getSessionMode(sessionId));
   const lastError = useListener((state) => state.live.lastError);
+  const lastErrorSessionId = useListener(
+    (state) => state.live.lastErrorSessionId,
+  );
+  const lastErrorIsAudioRelated = useListener(
+    (state) => state.live.lastErrorIsAudioRelated,
+  );
   const active = sessionMode === "active" || sessionMode === "finalizing";
   const batching = sessionMode === "running_batch";
 
@@ -132,8 +138,10 @@ export function useListenButtonState(sessionId: string) {
   const isDisabled = batching;
 
   let warningMessage = "";
-  if (lastError) {
+  let recoverySettingsTab: "permissions" | null = null;
+  if (lastError && lastErrorSessionId === sessionId) {
     warningMessage = `Session failed: ${lastError}`;
+    recoverySettingsTab = lastErrorIsAudioRelated ? "permissions" : null;
   } else if (batching) {
     warningMessage = "Batch transcription in progress.";
   }
@@ -142,6 +150,7 @@ export function useListenButtonState(sessionId: string) {
     shouldRender,
     isDisabled,
     warningMessage,
+    recoverySettingsTab,
   };
 }
 
