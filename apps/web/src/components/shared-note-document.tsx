@@ -10,6 +10,10 @@ import {
   useState,
 } from "react";
 
+// The read surface that otherwise carries these styles is lazy-loaded, so the
+// static document would render unstyled during SSR and on the fallback paths.
+import "@hypr/editor/styles.css";
+
 import {
   getSafeSharedNoteHref,
   isMatchingSharedNoteAttachmentDownload,
@@ -60,7 +64,7 @@ export function SharedNoteDocument({
   }, [attachments, document, excludedAttachmentIds]);
   return (
     <AttachmentContext.Provider value={context}>
-      <div className="ProseMirror prosemirror-editor session-note-editor shared-note-document text-color [&_li]:!text-base [&_li]:!leading-5 [&_p]:!text-base [&_p]:!leading-5">
+      <div className="ProseMirror prosemirror-editor note-typography session-note-editor shared-note-document text-color">
         {renderChildren(document.content, "document")}
         {unreferencedAttachments.length > 0 ? (
           <section className="border-color-subtle mt-10 border-t pt-6">
@@ -132,16 +136,23 @@ function renderNode(node: SharedNoteNode, key: string): ReactNode {
           {children}
         </ul>
       );
-    case "orderedList":
+    case "orderedList": {
+      const start = getIntegerAttr(node, "start", 1, 1_000_000, 1);
       return (
         <ol
           key={key}
           className="list-decimal pl-6"
-          start={getIntegerAttr(node, "start", 1, 1_000_000, 1)}
+          start={start}
+          style={
+            start === 1
+              ? undefined
+              : { counterReset: `ol-counter ${start - 1}` }
+          }
         >
           {children}
         </ol>
       );
+    }
     case "listItem":
       return <li key={key}>{children}</li>;
     case "taskList":
@@ -154,7 +165,7 @@ function renderNode(node: SharedNoteNode, key: string): ReactNode {
       const checked =
         node.attrs?.checked === true || node.attrs?.status === "done";
       return (
-        <li key={key}>
+        <li key={key} data-checked={checked ? "true" : "false"}>
           <label className="task-checkbox-label">
             <input
               type="checkbox"
@@ -379,6 +390,9 @@ function renderMarkedText(node: SharedNoteNode, key: string) {
         break;
       case "strike":
         content = <s key={markKey}>{content}</s>;
+        break;
+      case "underline":
+        content = <u key={markKey}>{content}</u>;
         break;
       case "highlight":
         content = <mark key={markKey}>{content}</mark>;
