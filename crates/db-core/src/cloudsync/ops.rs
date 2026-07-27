@@ -623,10 +623,47 @@ pub(crate) async fn interruptible_cleanup(
     table_name: &str,
     interrupt: &super::CloudsyncInterruptHandle,
 ) -> Result<(), hypr_cloudsync::Error> {
-    let registration = interrupt.register(connection).await?;
+    sqlx::query("SAVEPOINT cloudsync_cleanup")
+        .execute(&mut *connection)
+        .await?;
+    let registration = match interrupt.register(connection).await {
+        Ok(registration) => registration,
+        Err(error) => {
+            rollback_cleanup_savepoint(connection).await?;
+            return Err(error.into());
+        }
+    };
     let result = hypr_cloudsync::cleanup(&mut *connection, table_name).await;
-    registration.finish(connection).await?;
-    result
+    if let Err(error) = registration.finish(connection).await {
+        rollback_cleanup_savepoint(connection).await?;
+        return Err(error.into());
+    }
+
+    match result {
+        Ok(()) => match sqlx::query("RELEASE cloudsync_cleanup")
+            .execute(&mut *connection)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                rollback_cleanup_savepoint(connection).await?;
+                Err(error.into())
+            }
+        },
+        Err(error) => {
+            rollback_cleanup_savepoint(connection).await?;
+            Err(error)
+        }
+    }
+}
+
+async fn rollback_cleanup_savepoint(
+    connection: &mut SqliteConnection,
+) -> Result<(), hypr_cloudsync::Error> {
+    sqlx::query("ROLLBACK TO cloudsync_cleanup; RELEASE cloudsync_cleanup")
+        .execute(connection)
+        .await?;
+    Ok(())
 }
 
 pub(crate) async fn interruptible_init(
@@ -871,7 +908,7 @@ async fn return_pool_connections(mut connections: Vec<PoolConnection<Sqlite>>) {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
@@ -913,7 +950,7 @@ mod tests {
         ));
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     #[derive(Clone, Copy, Debug)]
     enum StalledNetworkOperation {
         ManualSend,
@@ -921,7 +958,7 @@ mod tests {
         LegacySync,
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     async fn assert_stalled_operation_drains_before_local_write(
         operation: StalledNetworkOperation,
     ) {
@@ -1035,7 +1072,7 @@ mod tests {
         db.cloudsync_close_connection().await.unwrap();
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     #[tokio::test]
     async fn manual_and_legacy_network_calls_drain_before_local_writes() {
         for _ in 0..3 {
@@ -1050,7 +1087,7 @@ mod tests {
             .await;
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     #[tokio::test]
     async fn native_logout_cleanup_interrupt_drains_before_local_write() {
         let directory = tempfile::tempdir().unwrap();
@@ -1119,7 +1156,7 @@ mod tests {
             .expect("native CloudSync logout interruption crashed the pinned SQLite worker");
         db.cloudsync_terminate_and_close().await.unwrap();
         tokio::time::timeout(
-            Duration::from_millis(250),
+            Duration::from_secs(2),
             sqlx::query("INSERT INTO items (id, value) VALUES ('after', 'local')")
                 .execute(db.pool()),
         )
@@ -1128,7 +1165,7 @@ mod tests {
         .unwrap();
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     #[tokio::test]
     async fn tracked_table_cleanup_interrupt_drains_before_local_write() {
         let db = Arc::new(Db::connect_memory().await.unwrap());
@@ -1152,6 +1189,16 @@ mod tests {
             SELECT printf('item-%d', id), printf('value-%d', id) FROM rows",
         )
         .execute(db.pool())
+        .await
+        .unwrap();
+        let tracking_schema_before: Vec<(String, String)> = sqlx::query_as(
+            "SELECT type, name
+             FROM sqlite_schema
+             WHERE (type = 'table' AND name = 'items_cloudsync')
+                OR (type = 'trigger' AND tbl_name = 'items')
+             ORDER BY type, name",
+        )
+        .fetch_all(db.pool())
         .await
         .unwrap();
 
@@ -1184,6 +1231,20 @@ mod tests {
         db.cloudsync_version()
             .await
             .expect("native CloudSync table cleanup interruption crashed the pinned SQLite worker");
+        let tracking_schema_after: Vec<(String, String)> = sqlx::query_as(
+            "SELECT type, name
+             FROM sqlite_schema
+             WHERE (type = 'table' AND name = 'items_cloudsync')
+                OR (type = 'trigger' AND tbl_name = 'items')
+             ORDER BY type, name",
+        )
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            tracking_schema_after, tracking_schema_before,
+            "interrupted native CloudSync table cleanup left partial tracking schema"
+        );
         tokio::time::timeout(
             Duration::from_millis(250),
             sqlx::query("INSERT INTO items (id, value) VALUES ('after', 'local')")
@@ -1194,9 +1255,30 @@ mod tests {
             "immediate local write remained blocked after native CloudSync table cleanup interruption",
         )
         .unwrap();
+        db.cloudsync_cleanup("items")
+            .await
+            .expect("CloudSync table cleanup retry failed after interruption");
+        let tracking_schema_after_retry: Vec<(String, String)> = sqlx::query_as(
+            "SELECT type, name
+             FROM sqlite_schema
+             WHERE (type = 'table' AND name = 'items_cloudsync')
+                OR (type = 'trigger' AND tbl_name = 'items')
+             ORDER BY type, name",
+        )
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        assert!(
+            tracking_schema_after_retry.is_empty(),
+            "successful CloudSync table cleanup retry left tracking schema"
+        );
+        sqlx::query("INSERT INTO items (id, value) VALUES ('after-retry', 'local')")
+            .execute(db.pool())
+            .await
+            .expect("local write failed after successful CloudSync table cleanup retry");
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     #[tokio::test]
     async fn populated_table_init_interrupt_drains_before_local_write() {
         let db = Arc::new(Db::connect_memory().await.unwrap());
@@ -1274,7 +1356,7 @@ mod tests {
         .unwrap();
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     #[tokio::test]
     async fn pending_payload_interrupt_drains_before_local_write() {
         let db = Arc::new(Db::connect_memory().await.unwrap());
