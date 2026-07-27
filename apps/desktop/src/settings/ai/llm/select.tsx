@@ -23,12 +23,17 @@ import { type Provider, PROVIDERS } from "./shared";
 
 import { useAuth } from "~/auth";
 import { useBillingAccess } from "~/auth/billing-context";
-import { providerRowId, ProviderIconSlot } from "~/settings/ai/shared";
+import {
+  providerRowId,
+  ProviderIconSlot,
+  useIsProviderReady,
+} from "~/settings/ai/shared";
 import {
   getProviderSelectionBlockers,
   requiresEntitlement,
 } from "~/settings/ai/shared/eligibility";
 import { listAnthropicModels } from "~/settings/ai/shared/list-anthropic";
+import { listAppleFoundationModels } from "~/settings/ai/shared/list-apple-foundation";
 import { listAzureAIModels } from "~/settings/ai/shared/list-azure-ai";
 import { listAzureOpenAIModels } from "~/settings/ai/shared/list-azure-openai";
 import { listCloudflareWorkersAIModels } from "~/settings/ai/shared/list-cloudflare-workers-ai";
@@ -424,6 +429,7 @@ export function SelectProviderAndModel() {
 
 type ProviderStatus = {
   configured: boolean;
+  availabilityPending?: boolean;
   listModels?: () => Promise<ListModelsResult>;
 };
 
@@ -437,11 +443,13 @@ export function getLlmProviderStatus({
   config,
   isAuthenticated,
   isPaid,
+  isAvailable,
 }: {
   provider: Provider;
   config?: ProviderConfig;
   isAuthenticated: boolean;
   isPaid: boolean;
+  isAvailable?: boolean;
 }): ProviderStatus {
   const baseUrl = String(config?.base_url || provider.baseUrl || "").trim();
   const apiKey = String(config?.api_key || "").trim();
@@ -455,6 +463,15 @@ export function getLlmProviderStatus({
 
   if (!eligible) {
     return { configured: false };
+  }
+
+  if (provider.id === "apple_foundation") {
+    if (isAvailable === undefined) {
+      return { configured: false, availabilityPending: true };
+    }
+    if (!isAvailable) {
+      return { configured: false };
+    }
   }
 
   if (provider.id === "hyprnote") {
@@ -500,6 +517,9 @@ export function getLlmProviderStatus({
     case "ollama":
       listModelsFunc = () => listOllamaModels(baseUrl, apiKey);
       break;
+    case "apple_foundation":
+      listModelsFunc = listAppleFoundationModels;
+      break;
     case "lmstudio":
       listModelsFunc = () => listLMStudioModels(baseUrl, apiKey);
       break;
@@ -522,6 +542,11 @@ function useConfiguredMapping(): {
 } {
   const auth = useAuth();
   const billing = useBillingAccess();
+  const appleFoundationAvailable = useIsProviderReady(
+    "apple_foundation",
+    "llm",
+    PROVIDERS,
+  );
   const { providers: configuredProviders, isReady } =
     useAiProvidersState("llm");
 
@@ -536,11 +561,18 @@ function useConfiguredMapping(): {
             config,
             isAuthenticated: !!auth?.session,
             isPaid: billing.isPaid,
+            isAvailable:
+              provider.id === "apple_foundation"
+                ? appleFoundationAvailable
+                : undefined,
           }),
         ];
       }),
     ) as Record<string, ProviderStatus>;
-  }, [configuredProviders, auth, billing]);
+  }, [configuredProviders, auth, billing, appleFoundationAvailable]);
 
-  return { providers: mapping, isReady };
+  return {
+    providers: mapping,
+    isReady: isReady && mapping.apple_foundation?.availabilityPending !== true,
+  };
 }
