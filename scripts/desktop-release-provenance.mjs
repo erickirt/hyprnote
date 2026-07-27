@@ -1,12 +1,29 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_ASSET_BASE_URL = "https://cdn.crabnebula.app/asset";
 const SOURCE_WORKFLOW = ".github/workflows/desktop_cd.yaml";
-const CN_ACTION_REPOSITORY = "crabnebula-dev/cloud-release";
+const EXPECTED_PUBLIC_PLATFORMS = [
+  "appimage-aarch64",
+  "appimage-x86_64",
+  "deb-aarch64",
+  "deb-x86_64",
+  "dmg-aarch64",
+  "dmg-x86_64",
+  "nsis-x86_64",
+];
+const EXPECTED_UPDATE_PLATFORMS = [
+  "darwin-aarch64",
+  "darwin-x86_64",
+  "linux-aarch64-appimage",
+  "linux-aarch64-deb",
+  "linux-x86_64-appimage",
+  "linux-x86_64-deb",
+  "windows-x86_64-nsis",
+];
 
 function invariant(condition, message) {
   if (!condition) {
@@ -56,11 +73,18 @@ function normalizeCnVersion(value) {
   return value.trim();
 }
 
-function normalizeCnActionRef(value) {
+function normalizeCnAssetId(value) {
   invariant(
-    typeof value === "string" &&
-      new RegExp(`^${CN_ACTION_REPOSITORY}@[0-9a-f]{40}$`).test(value),
-    "CrabNebula action ref must be pinned to a full commit SHA",
+    typeof value === "string" && /^[A-Za-z0-9_-]+$/.test(value),
+    "CrabNebula CLI asset ID is invalid",
+  );
+  return value;
+}
+
+function normalizeSha256(value, label) {
+  invariant(
+    typeof value === "string" && /^[0-9a-f]{64}$/.test(value),
+    `${label} must be a lowercase SHA-256`,
   );
   return value;
 }
@@ -118,6 +142,34 @@ function normalizeAssets(release) {
   return assets;
 }
 
+export function verifyDesktopPlatformSets(release) {
+  const assets = normalizeAssets(release);
+  invariant(
+    assets.length === EXPECTED_PUBLIC_PLATFORMS.length,
+    `Release must contain exactly ${EXPECTED_PUBLIC_PLATFORMS.length} desktop assets`,
+  );
+
+  const publicPlatforms = assets
+    .map((asset) => asset.publicPlatform)
+    .filter((platform) => platform !== null)
+    .sort();
+  invariant(
+    JSON.stringify(publicPlatforms) ===
+      JSON.stringify(EXPECTED_PUBLIC_PLATFORMS),
+    "Release public platforms do not match the desktop allowlist",
+  );
+
+  const updatePlatforms = assets
+    .map((asset) => asset.updatePlatform)
+    .filter((platform) => platform !== null)
+    .sort();
+  invariant(
+    JSON.stringify(updatePlatforms) ===
+      JSON.stringify(EXPECTED_UPDATE_PLATFORMS),
+    "Release update platforms do not match the desktop allowlist",
+  );
+}
+
 async function hashStream(stream) {
   const hash = createHash("sha256");
   let size = 0;
@@ -163,7 +215,8 @@ export async function createManifest({
   candidateSha,
   workflowRunId,
   cnVersion,
-  cnActionRef,
+  cnAssetId,
+  cnSha256,
   assetDir,
 }) {
   invariant(
@@ -195,7 +248,8 @@ export async function createManifest({
     tools: {
       crabNebula: {
         cliVersion: normalizeCnVersion(cnVersion),
-        actionRef: normalizeCnActionRef(cnActionRef),
+        cliAssetId: normalizeCnAssetId(cnAssetId),
+        cliSha256: normalizeSha256(cnSha256, "CrabNebula CLI SHA-256"),
       },
     },
     assets: hashedAssets,
@@ -212,7 +266,8 @@ export async function verifyManifest({
   candidateSha,
   workflowRunId,
   cnVersion,
-  cnActionRef,
+  cnAssetId,
+  cnSha256,
   assetDir,
 }) {
   invariant(
@@ -242,8 +297,13 @@ export async function verifyManifest({
     "CrabNebula CLI version mismatch",
   );
   invariant(
-    manifest.tools?.crabNebula?.actionRef === normalizeCnActionRef(cnActionRef),
-    "CrabNebula action ref mismatch",
+    manifest.tools?.crabNebula?.cliAssetId === normalizeCnAssetId(cnAssetId),
+    "CrabNebula CLI asset ID mismatch",
+  );
+  invariant(
+    manifest.tools?.crabNebula?.cliSha256 ===
+      normalizeSha256(cnSha256, "CrabNebula CLI SHA-256"),
+    "CrabNebula CLI SHA-256 mismatch",
   );
   invariant(
     release?.version === version,
@@ -275,33 +335,144 @@ export async function verifyManifest({
   }
 }
 
+export async function verifyLocalAssets({
+  manifest,
+  version,
+  candidateSha,
+  workflowRunId,
+  cnVersion,
+  cnAssetId,
+  cnSha256,
+  assetDir,
+  platformAssetIds,
+}) {
+  invariant(assetDir, "Missing local asset directory");
+  invariant(
+    Array.isArray(manifest?.assets),
+    "Provenance manifest has no asset list",
+  );
+  const entries = await readdir(assetDir, { withFileTypes: true });
+  invariant(
+    entries.every((entry) => entry.isFile()),
+    "Local asset directory must contain only regular files",
+  );
+
+  const mirroredAssets = manifest.assets.filter(
+    (asset) => typeof asset?.publicPlatform === "string",
+  );
+  invariant(mirroredAssets.length > 0, "Provenance has no public assets");
+  invariant(
+    platformAssetIds &&
+      typeof platformAssetIds === "object" &&
+      !Array.isArray(platformAssetIds),
+    "Missing downloaded platform asset IDs",
+  );
+  const expectedPlatforms = mirroredAssets
+    .map((asset) => asset.publicPlatform)
+    .sort();
+  invariant(
+    new Set(expectedPlatforms).size === expectedPlatforms.length,
+    "Provenance contains duplicate public platforms",
+  );
+  const downloadedPlatforms = Object.keys(platformAssetIds).sort();
+  invariant(
+    JSON.stringify(downloadedPlatforms) === JSON.stringify(expectedPlatforms),
+    "Downloaded public platforms do not match the provenance manifest",
+  );
+  for (const asset of mirroredAssets) {
+    const downloadedAssetId = normalizeCnAssetId(
+      platformAssetIds[asset.publicPlatform],
+    );
+    invariant(
+      downloadedAssetId === normalizeCnAssetId(asset.id),
+      `Downloaded asset ID for ${asset.publicPlatform} does not match the provenance manifest`,
+    );
+  }
+
+  const expectedAssetIds = mirroredAssets
+    .map((asset) => normalizeCnAssetId(asset?.id))
+    .sort();
+  const actualAssetIds = entries.map((entry) => entry.name).sort();
+  invariant(
+    JSON.stringify(actualAssetIds) === JSON.stringify(expectedAssetIds),
+    "Local asset IDs do not match the provenance manifest",
+  );
+
+  const release = {
+    version,
+    status: "draft",
+    assets: mirroredAssets.map(({ sha256: _sha256, ...asset }) => asset),
+  };
+  await verifyManifest({
+    release,
+    manifest: { ...manifest, assets: mirroredAssets },
+    version,
+    candidateSha,
+    workflowRunId,
+    cnVersion,
+    cnAssetId,
+    cnSha256,
+    assetDir,
+  });
+}
+
 async function main() {
   const { command, args } = parseArgs(process.argv.slice(2));
   invariant(
-    command === "create" || command === "verify",
-    "Expected create or verify command",
+    command === "create" ||
+      command === "verify" ||
+      command === "verify-assets" ||
+      command === "verify-platforms",
+    "Expected create, verify, verify-assets, or verify-platforms command",
   );
 
-  const release = await readJson(args.release);
   const common = {
-    release,
     version: args.version,
     candidateSha: args["candidate-sha"],
     workflowRunId: args["run-id"],
     cnVersion: args["cn-version"],
-    cnActionRef: args["cn-action-ref"],
+    cnAssetId: args["cn-asset-id"],
+    cnSha256: args["cn-sha256"],
     assetDir: args["asset-dir"],
   };
 
   if (command === "create") {
     invariant(args.output, "Missing --output");
-    await createManifest({ ...common, output: args.output });
+    await createManifest({
+      ...common,
+      release: await readJson(args.release),
+      output: args.output,
+    });
     console.log(`Wrote release provenance to ${args.output}`);
     return;
   }
 
+  if (command === "verify-platforms") {
+    invariant(args.release, "Missing --release");
+    verifyDesktopPlatformSets(await readJson(args.release));
+    console.log("Release desktop platforms match the allowlist");
+    return;
+  }
+
   invariant(args.manifest, "Missing --manifest");
-  await verifyManifest({ ...common, manifest: await readJson(args.manifest) });
+  const manifest = await readJson(args.manifest);
+  if (command === "verify-assets") {
+    let platformAssetIds;
+    try {
+      platformAssetIds = JSON.parse(args["platform-asset-ids"]);
+    } catch {
+      throw new Error("Downloaded platform asset IDs must be valid JSON");
+    }
+    await verifyLocalAssets({ ...common, manifest, platformAssetIds });
+    console.log("Local release assets match provenance");
+    return;
+  }
+
+  await verifyManifest({
+    ...common,
+    release: await readJson(args.release),
+    manifest,
+  });
   console.log("Release provenance verified");
 }
 
