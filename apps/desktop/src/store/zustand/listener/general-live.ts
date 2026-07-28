@@ -43,6 +43,7 @@ import type {
   TranscriptState,
 } from "./transcript";
 
+import { syncCloudApiSnapshotBestEffort } from "~/cloud-api/client";
 import { getSessionResourcePath } from "~/session/resource-path";
 import { fromResult } from "~/stt/fromResult";
 
@@ -718,6 +719,8 @@ export const stopLiveSession = <T extends GeneralState>(
         if (!sessionId) {
           return;
         }
+
+        syncCloudApiSnapshotBestEffort(sessionId);
 
         void Promise.all([
           settingsCommands.vaultBase().then((r) => {
