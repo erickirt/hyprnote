@@ -1,18 +1,20 @@
 import {
   getRecordingPermissionsAsync,
   RecordingPresets,
+  type RecordingStatus,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
   useAudioRecorder,
   useAudioRecorderState,
 } from "expo-audio";
 import { Directory, File, Paths } from "expo-file-system";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { WAVEFORM_BAR_COUNT } from "@/components/waveform";
 import { catalogSessionAudio } from "@/data/audio-catalog";
 import { transcribeSession } from "@/data/transcribe";
 import { captureAnalytics } from "@/lib/analytics";
+import { captureOperationalError } from "@/lib/error-reporting";
 
 const METERING_FLOOR_DB = -50;
 
@@ -44,10 +46,41 @@ export function useSessionRecorder(
   durationMs: number;
   stop: () => Promise<StopResult>;
 } {
-  const recorder = useAudioRecorder({
-    ...RecordingPresets.HIGH_QUALITY,
-    isMeteringEnabled: true,
-  });
+  const reportedStatusErrorRef = useRef<string | null>(null);
+  const handleRecorderStatus = useCallback((status: RecordingStatus) => {
+    const errorKey = status.hasError
+      ? (status.error ?? "unknown")
+      : status.mediaServicesDidReset
+        ? "media_services_reset"
+        : null;
+    if (!errorKey || reportedStatusErrorRef.current === errorKey) return;
+
+    reportedStatusErrorRef.current = errorKey;
+    captureOperationalError(
+      new Error(
+        status.mediaServicesDidReset
+          ? "Audio media services reset"
+          : (status.error ?? "Native recording failed"),
+      ),
+      {
+        operation: status.mediaServicesDidReset
+          ? "recording_media_services_reset"
+          : "recording_native_status",
+        level: status.mediaServicesDidReset ? "warning" : "error",
+        tags: {
+          media_services_reset: status.mediaServicesDidReset === true,
+        },
+      },
+    );
+  }, []);
+  const recorder = useAudioRecorder(
+    {
+      ...RecordingPresets.HIGH_QUALITY,
+      directory: "document",
+      isMeteringEnabled: true,
+    },
+    handleRecorderStatus,
+  );
   const recorderState = useAudioRecorderState(recorder, 50);
   const [phase, setPhase] = useState<RecorderPhase>("idle");
   const [levels, setLevels] = useState<number[] | null>(null);
@@ -98,7 +131,10 @@ export function useSessionRecorder(
         });
         setPhase("recording");
       } catch (error) {
-        console.warn("[recorder] failed to start", error);
+        captureOperationalError(error, {
+          operation: "recording_start",
+          tags: { stage: "capture_start" },
+        });
         captureAnalytics("session_start_failed", {
           failure_stage: "capture_start",
         });
@@ -161,7 +197,10 @@ export function useSessionRecorder(
       setPhase("saved");
       return "saved";
     } catch (error) {
-      console.warn("[recorder] failed to save recording", error);
+      captureOperationalError(error, {
+        operation: "recording_save",
+        tags: { stage: "persist_audio" },
+      });
       setPhase("error");
       return "failed";
     }

@@ -8,6 +8,7 @@ import { catalogSessionAudio } from "@/data/audio-catalog";
 import { createSession, deleteSession } from "@/data/session";
 import { transcribeSession } from "@/data/transcribe";
 import { captureAnalytics } from "@/lib/analytics";
+import { captureOperationalError } from "@/lib/error-reporting";
 import { nowIso } from "@/lib/ids";
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -86,7 +87,12 @@ async function importAsset(asset: DocumentPickerAsset): Promise<string> {
   } catch (error) {
     // The session exists before the audio does, so a failed copy or catalog
     // would otherwise strand an empty session on the timeline.
-    await deleteSession(sessionId).catch(() => {});
+    await deleteSession(sessionId).catch((cleanupError) => {
+      captureOperationalError(cleanupError, {
+        operation: "voice_memo_import_cleanup",
+        level: "warning",
+      });
+    });
     throw error;
   }
 
@@ -108,7 +114,12 @@ export async function importVoiceMemos(): Promise<string[]> {
     try {
       created.push(await importAsset(asset));
     } catch (error) {
-      console.warn(`voice memo import failed for ${asset.name}`, error);
+      captureOperationalError(error, {
+        operation: "voice_memo_import",
+        context: {
+          content_type: asset.mimeType ?? "unknown",
+        },
+      });
     }
   }
   return created;

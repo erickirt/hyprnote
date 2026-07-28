@@ -3,6 +3,7 @@ import {
   AuthApiError,
   AuthSessionMissingError,
   type Session,
+  type SupabaseClient,
 } from "@supabase/supabase-js";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
@@ -29,6 +30,11 @@ import {
   resetAnalytics,
 } from "@/lib/analytics";
 import { env, hasSupabaseEnv } from "@/lib/env";
+import {
+  addOperationalBreadcrumb,
+  captureOperationalError,
+  setErrorReportingUser,
+} from "@/lib/error-reporting";
 
 export type AuthState = {
   status: "loading" | "signed_out" | "signed_in";
@@ -119,7 +125,10 @@ function acceptAuthTokens(accessToken: string, refreshToken: string): void {
       ({ error }) => {
         inFlightTokens.delete(key);
         if (error) {
-          console.error("[auth] setSession failed", error);
+          captureOperationalError(error, {
+            operation: "auth_session_set",
+            tags: { method: "browser_handoff" },
+          });
           captureAnalytics("auth_failed", {
             method: "browser_handoff",
             failure_stage: "set_session",
@@ -130,7 +139,10 @@ function acceptAuthTokens(accessToken: string, refreshToken: string): void {
       },
       (error) => {
         inFlightTokens.delete(key);
-        console.error("[auth] setSession failed", error);
+        captureOperationalError(error, {
+          operation: "auth_session_set",
+          tags: { method: "browser_handoff" },
+        });
         captureAnalytics("auth_failed", {
           method: "browser_handoff",
           failure_stage: "set_session",
@@ -154,8 +166,28 @@ async function readPersistedSession(): Promise<Session | null> {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Session;
     return parsed?.access_token && parsed?.refresh_token ? parsed : null;
-  } catch {
+  } catch (error) {
+    captureOperationalError(error, {
+      operation: "auth_persisted_session_read",
+      level: "warning",
+    });
     return null;
+  }
+}
+
+async function clearInvalidSession(
+  client: SupabaseClient,
+  reason: "fatal_error" | "rejected",
+) {
+  const { error } = await client.auth
+    .signOut({ scope: "local" })
+    .catch((error: unknown) => ({ error }));
+  if (error) {
+    captureOperationalError(error, {
+      operation: "auth_invalid_session_clear",
+      level: "warning",
+      tags: { reason },
+    });
   }
 }
 
@@ -165,12 +197,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     bypass ? null : undefined,
   );
   const sessionRef = useRef<Session | null | undefined>(session);
+  const identifiedUserIdRef = useRef<string | null>(null);
+  const reportedUndecodableUserIdRef = useRef<string | null>(null);
   // Prevents double init in React StrictMode (refresh token races)
   const initStartedRef = useRef(false);
 
   const setSession = useCallback((next: Session | null) => {
     sessionRef.current = next;
     setSessionState(next);
+    const userId = next?.user.id ?? null;
+    setErrorReportingUser(userId);
+    if (
+      next &&
+      !decodeJwtPayload(next.access_token) &&
+      reportedUndecodableUserIdRef.current !== userId
+    ) {
+      reportedUndecodableUserIdRef.current = userId;
+      captureOperationalError(new Error("Mobile auth token decode failed"), {
+        operation: "auth_token_decode",
+        level: "warning",
+      });
+    } else if (!next) {
+      reportedUndecodableUserIdRef.current = null;
+    }
+    if (userId && userId !== identifiedUserIdRef.current) {
+      identifiedUserIdRef.current = userId;
+      identifyAnalytics(userId);
+    } else if (!userId) {
+      identifiedUserIdRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
@@ -185,10 +240,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         async ({ data, error }) => {
           if (error) {
             if (isFatalSessionError(error)) {
-              await client.auth.signOut({ scope: "local" }).catch(() => {});
+              await clearInvalidSession(client, "fatal_error");
               setSession(null);
               return;
             }
+            addOperationalBreadcrumb("auth_session_restore", {
+              outcome: "persisted_fallback",
+              reason: "get_session_error",
+            });
             setSession(await readPersistedSession());
             return;
           }
@@ -196,10 +255,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
         async (error) => {
           if (isFatalSessionError(error)) {
-            await client.auth.signOut({ scope: "local" }).catch(() => {});
+            await clearInvalidSession(client, "rejected");
             setSession(null);
             return;
           }
+          addOperationalBreadcrumb("auth_session_restore", {
+            outcome: "persisted_fallback",
+            reason: "get_session_rejected",
+          });
           setSession(await readPersistedSession());
         },
       );
@@ -215,7 +278,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setSession(nextSession);
       if (event === "SIGNED_IN" && nextSession) {
-        identifyAnalytics(nextSession.user.id);
         captureAnalytics("user_signed_in", {
           method: "browser_handoff",
         });
@@ -230,12 +292,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [setSession]);
 
   useEffect(() => {
-    if (session?.user.id) {
-      identifyAnalytics(session.user.id);
-    }
-  }, [session?.user.id]);
-
-  useEffect(() => {
     if (!supabase) {
       return;
     }
@@ -243,11 +299,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const subscription = Linking.addEventListener("url", (event) => {
       handleAuthCallbackUrl(event.url);
     });
-    void Linking.getInitialURL().then((url) => {
-      if (url) {
-        handleAuthCallbackUrl(url);
-      }
-    });
+    void Linking.getInitialURL().then(
+      (url) => {
+        if (url) {
+          handleAuthCallbackUrl(url);
+        }
+      },
+      (error) => {
+        captureOperationalError(error, {
+          operation: "auth_initial_url_read",
+          level: "warning",
+        });
+      },
+    );
 
     return () => {
       subscription.remove();
@@ -277,6 +341,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       }
     } catch (error) {
+      captureOperationalError(error, {
+        operation: "auth_browser_open",
+        tags: { method: "browser_handoff" },
+      });
       captureAnalytics("auth_failed", {
         method: "browser_handoff",
         failure_stage: "open_browser",
@@ -295,12 +363,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .signOut({ scope: "local" })
       .catch((error: unknown) => ({ error }));
     if (error) {
+      captureOperationalError(error, {
+        operation: "auth_sign_out",
+        level: "warning",
+      });
       // auth-js can early-return without clearing storage; force local cleanup
       // so the session cannot silently resurrect on next launch.
       supabase.auth.stopAutoRefresh();
-      await AsyncStorage.removeItem(authStorageKey).catch(() => {});
+      await AsyncStorage.removeItem(authStorageKey).catch((storageError) => {
+        captureOperationalError(storageError, {
+          operation: "auth_storage_clear",
+          level: "warning",
+        });
+      });
     }
     setSession(null);
+    setErrorReportingUser(null);
     resetAnalytics();
   }, [setSession]);
 
