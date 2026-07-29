@@ -1,4 +1,15 @@
-use hypr_template_support::DeviceInfo;
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfo {
+    pub platform: String,
+    pub arch: String,
+    pub os_version: String,
+    pub app_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
+}
 
 pub struct Misc<'a, R: tauri::Runtime, M: tauri::Manager<R>> {
     #[allow(dead_code)]
@@ -12,7 +23,7 @@ impl<'a, R: tauri::Runtime, M: tauri::Manager<R>> Misc<'a, R, M> {
     }
 
     pub fn get_fingerprint(&self) -> String {
-        hypr_host::fingerprint()
+        anlg_host::fingerprint()
     }
 
     pub fn get_device_info(&self, locale: Option<String>) -> DeviceInfo {
@@ -27,7 +38,7 @@ impl<'a, R: tauri::Runtime, M: tauri::Manager<R>> Misc<'a, R, M> {
     }
 
     pub fn opinionated_md_to_html(&self, text: impl AsRef<str>) -> Result<String, String> {
-        hypr_buffer::opinionated_md_to_html(text.as_ref()).map_err(|e| e.to_string())
+        anlg_buffer::opinionated_md_to_html(text.as_ref()).map_err(|e| e.to_string())
     }
 }
 

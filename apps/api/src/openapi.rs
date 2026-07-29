@@ -31,18 +31,17 @@ pub struct ApiDoc;
 pub fn openapi() -> utoipa::openapi::OpenApi {
     let mut doc = ApiDoc::openapi();
 
-    let stt_doc = hypr_transcribe_proxy::openapi();
-    let llm_doc = hypr_llm_proxy::openapi();
-    let pyannote_doc = with_path_prefix(hypr_api_pyannote::openapi(), "/pyannote");
-    let calendar_doc = with_path_prefix(hypr_api_calendar::openapi(), "/calendar");
-    let mail_doc = with_path_prefix(hypr_api_mail::openapi(), "/mail");
-    let ticket_doc = with_path_prefix(hypr_api_ticket::openapi(), "/ticket");
-    let nango_doc = with_path_prefix(hypr_api_nango::openapi(), "/nango");
-    let subscription_doc = with_path_prefix(hypr_api_subscription::openapi(), "/subscription");
-    let support_doc = hypr_api_support::openapi();
-    let sync_doc = with_path_prefix(hypr_api_sync::openapi(), "/sync");
-    let shared_notes_doc = hypr_api_sync::shared_notes_openapi();
-    let cloud_api_doc = hypr_api_cloud::openapi();
+    let stt_doc = anlg_transcribe_proxy::openapi();
+    let llm_doc = anlg_llm_proxy::openapi();
+    let pyannote_doc = with_path_prefix(anlg_api_pyannote::openapi(), "/pyannote");
+    let calendar_doc = with_path_prefix(anlg_api_calendar::openapi(), "/calendar");
+    let mail_doc = with_path_prefix(anlg_api_mail::openapi(), "/mail");
+    let ticket_doc = with_path_prefix(anlg_api_ticket::openapi(), "/ticket");
+    let nango_doc = with_path_prefix(anlg_api_nango::openapi(), "/nango");
+    let subscription_doc = with_path_prefix(anlg_api_subscription::openapi(), "/subscription");
+    let sync_doc = with_path_prefix(anlg_api_sync::openapi(), "/sync");
+    let shared_notes_doc = anlg_api_sync::shared_notes_openapi();
+    let cloud_api_doc = anlg_api_cloud::openapi();
 
     doc.merge(stt_doc);
     doc.merge(llm_doc);
@@ -52,7 +51,6 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
     doc.merge(ticket_doc);
     doc.merge(nango_doc);
     doc.merge(subscription_doc);
-    doc.merge(support_doc);
     doc.merge(sync_doc);
     doc.merge(shared_notes_doc);
     doc.merge(cloud_api_doc);
