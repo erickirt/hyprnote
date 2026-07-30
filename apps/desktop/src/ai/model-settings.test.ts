@@ -42,6 +42,11 @@ describe("deterministicGenerationSettings", () => {
     expect(
       deterministicGenerationSettings(model("anthropic", "claude-opus-4.8")),
     ).toEqual({});
+    expect(
+      deterministicGenerationSettings(
+        model("amazon_bedrock", "anthropic.claude-opus-4-8"),
+      ),
+    ).toEqual({});
   });
 
   it("omits temperature for GPT-5.6 Terra models", () => {
@@ -53,6 +58,11 @@ describe("deterministicGenerationSettings", () => {
     expect(
       deterministicGenerationSettings(
         model("anarlog", "openai/gpt-5.6-terra-2026-07-28"),
+      ),
+    ).toEqual({});
+    expect(
+      deterministicGenerationSettings(
+        model("amazon_bedrock", "openai.gpt-5.6-terra"),
       ),
     ).toEqual({});
   });

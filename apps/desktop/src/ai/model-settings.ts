@@ -20,11 +20,11 @@ function requiresDefaultTemperature(model: LanguageModel): boolean {
   const normalizedModelId = modelId.toLowerCase().replace(/\./g, "-");
   const modelName = normalizedModelId.includes("/")
     ? normalizedModelId.split("/").pop()!
-    : normalizedModelId;
+    : normalizedModelId.replace(/^(?:anthropic|openai)-/, "");
 
   const isClaude48 =
     (provider.startsWith("anthropic") ||
-      normalizedModelId.startsWith("anthropic/")) &&
+      /(?:^|[./])anthropic[./]/.test(modelId.toLowerCase())) &&
     /^claude-(?:opus|sonnet|haiku)-4-8(?:$|-)/.test(modelName);
   const isGpt56Terra = /^gpt-5-6-terra(?:$|-)/.test(modelName);
 
