@@ -156,7 +156,7 @@ const _PROVIDERS = [
     id: "xai",
     displayName: "xAI",
     badge: null,
-    icon: <Icon icon="simple-icons:x" width={16} />,
+    icon: <Icon icon="bxl:xai" width={16} />,
     baseUrl: "https://api.x.ai/v1",
     requirements: [{ kind: "requires_config", fields: ["api_key"] }],
     links: {

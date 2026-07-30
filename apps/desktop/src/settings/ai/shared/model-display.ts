@@ -48,7 +48,10 @@ export function displayLlmModelId(providerId: string, model: string): string {
 }
 
 function stripReleaseDate(modelId: string) {
-  return modelId.replace(/-(?:20\d{6}|20\d{2}-\d{2}-\d{2}|2\d{3})$/, "");
+  return modelId.replace(
+    /-(?:\d{2}-20\d{2}|20\d{6}|20\d{2}-\d{2}-\d{2}|2\d{3})$/,
+    "",
+  );
 }
 
 function formatClaudeModel(modelId: string) {

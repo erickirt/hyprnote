@@ -20,6 +20,9 @@ describe("displayLlmModelId", () => {
     expect(displayLlmModelId("amazon_bedrock", "anthropic.claude-opus-5")).toBe(
       "Claude Opus 5",
     );
+    expect(displayLlmModelId("cohere", "command-a-plus-05-2026")).toBe(
+      "Command A Plus",
+    );
   });
 
   test("formats common model families without changing stored ids", () => {
