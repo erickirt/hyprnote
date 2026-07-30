@@ -1,8 +1,10 @@
 import AudioCommon
+import CoreML
 import Foundation
 import OmnilingualASR
 import ParakeetASR
 import ParakeetStreamingASR
+import SpeechVAD
 import SwiftRs
 
 private enum SoniqoBridgeError: LocalizedError {
@@ -19,6 +21,7 @@ private enum SoniqoBridgeError: LocalizedError {
 private let soniqoFileTranscriptionSampleRate = 16_000
 private let parakeetBatchMinimumChunkSeconds = 20.0
 private let parakeetBatchMaximumChunkSeconds = 29.5
+private let community1DiarizationRepo = Community1DiarizationPipeline.defaultModelId
 
 private enum SpeechModelKind: String, CaseIterable {
   case parakeetStreaming = "soniqo-parakeet-streaming"
@@ -103,6 +106,10 @@ private enum SpeechModelKind: String, CaseIterable {
   }
 
   func filesReady() -> Bool {
+    speechFilesReady() && (self != .parakeetBatch || Self.community1FilesReady())
+  }
+
+  private func speechFilesReady() -> Bool {
     guard let directory = try? cacheDirectoryURL() else {
       return false
     }
@@ -129,7 +136,7 @@ private enum SpeechModelKind: String, CaseIterable {
   }
 
   func load(progressHandler: ((Double, String) -> Void)?) async throws -> LoadedSpeechModel {
-    let offlineMode = filesReady()
+    let offlineMode = speechFilesReady()
 
     switch self {
     case .parakeetStreaming:
@@ -140,12 +147,24 @@ private enum SpeechModelKind: String, CaseIterable {
         )
       )
     case .parakeetBatch:
+      let model = try await ParakeetASRModel.fromPretrained(
+        modelId: repo,
+        offlineMode: offlineMode,
+        progressHandler: { fraction, status in
+          progressHandler?(fraction * 0.9, status)
+        }
+      )
+      let diarizer = try await Community1DiarizationPipeline.fromPretrained(
+        modelId: community1DiarizationRepo,
+        offlineMode: Self.community1FilesReady(),
+        computeUnits: .cpuOnly,
+        progressHandler: { fraction, status in
+          progressHandler?(0.9 + fraction * 0.1, status)
+        }
+      )
       return .parakeetBatch(
-        try await ParakeetASRModel.fromPretrained(
-          modelId: repo,
-          offlineMode: offlineMode,
-          progressHandler: progressHandler
-        )
+        model,
+        diarizer
       )
     case .omnilingual:
       return .omnilingual(
@@ -176,6 +195,25 @@ private enum SpeechModelKind: String, CaseIterable {
 
     return regularFileExists(at: directory.appendingPathComponent("model.mil"))
       && directoryContainsRegularFile(at: directory.appendingPathComponent("weights"))
+  }
+
+  static func community1CacheDirectoryPath() -> String {
+    (try? HuggingFaceDownloader.getCacheDirectory(for: community1DiarizationRepo).path) ?? ""
+  }
+
+  private static func community1FilesReady() -> Bool {
+    guard
+      let directory = try? HuggingFaceDownloader.getCacheDirectory(
+        for: community1DiarizationRepo
+      )
+    else {
+      return false
+    }
+
+    return regularFileExists(at: directory.appendingPathComponent("config.json"))
+      && regularFileExists(at: directory.appendingPathComponent("plda.safetensors"))
+      && compiledCoreMLModelReady(at: directory.appendingPathComponent("segmentation.mlmodelc"))
+      && compiledCoreMLModelReady(at: directory.appendingPathComponent("embedding.mlmodelc"))
   }
 
   private static func directoryContainsFile(withExtension pathExtension: String, in directory: URL)
@@ -229,7 +267,7 @@ private enum SpeechModelKind: String, CaseIterable {
 
 private enum LoadedSpeechModel {
   case streaming(ParakeetStreamingASRModel)
-  case parakeetBatch(ParakeetASRModel)
+  case parakeetBatch(ParakeetASRModel, Community1DiarizationPipeline)
   case omnilingual(OmnilingualASRModel)
 
   func asStreamingModel() throws -> ParakeetStreamingASRModel {
@@ -241,6 +279,15 @@ private enum LoadedSpeechModel {
     return model
   }
 
+  func asDiarizationPipeline() throws -> Community1DiarizationPipeline {
+    guard case .parakeetBatch(_, let pipeline) = self else {
+      throw SoniqoBridgeError.message(
+        "The selected Soniqo model does not support speaker diarization.")
+    }
+
+    return pipeline
+  }
+
   func transcribe(audio: [Float], sampleRate: Int, language: String?) throws -> String {
     let normalizedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
     let languageHint = (normalizedLanguage?.isEmpty == false) ? normalizedLanguage : nil
@@ -248,7 +295,7 @@ private enum LoadedSpeechModel {
     switch self {
     case .streaming(let model):
       return try model.transcribeAudio(audio, sampleRate: sampleRate)
-    case .parakeetBatch(let model):
+    case .parakeetBatch(let model, _):
       return try model.transcribeAudio(audio, sampleRate: sampleRate, language: languageHint)
     case .omnilingual(let model):
       return try model.transcribeAudio(audio, sampleRate: sampleRate)
@@ -275,23 +322,6 @@ private struct FileTranscriptionPayload: Codable {
   var error: String?
 }
 
-private final class LivePartialPayload: Codable {
-  let source: String
-  let text: String
-  let isFinal: Bool
-
-  init(source: String, text: String, isFinal: Bool) {
-    self.source = source
-    self.text = text
-    self.isFinal = isFinal
-  }
-}
-
-private struct LiveAppendPayload: Codable {
-  var partials: [LivePartialPayload]
-  var error: String?
-}
-
 private struct StatusPayload: Codable {
   var running: Bool
   var error: String?
@@ -305,6 +335,58 @@ private func encodeJSON<T: Encodable>(_ value: T) -> String {
   }
 
   return string
+}
+
+private func encodeJSONObject(_ value: Any) -> String {
+  guard JSONSerialization.isValidJSONObject(value),
+    let data = try? JSONSerialization.data(withJSONObject: value),
+    let string = String(data: data, encoding: .utf8)
+  else {
+    return "{}"
+  }
+
+  return string
+}
+
+private func encodeLiveAppendJSON(
+  partials: [ParakeetStreamingASRModel.PartialTranscript],
+  source: String,
+  error: String? = nil
+) -> String {
+  var payload: [String: Any] = [
+    "partials": partials.map { partial in
+      [
+        "source": source,
+        "text": partial.text,
+        "isFinal": partial.isFinal,
+      ] as [String: Any]
+    }
+  ]
+  if let error {
+    payload["error"] = error
+  } else {
+    payload["error"] = NSNull()
+  }
+  return encodeJSONObject(payload)
+}
+
+private func encodeDiarizationJSON(_ result: DiarizationResult?, error: String? = nil) -> String {
+  var payload: [String: Any] = [
+    "segments": result?.segments.map { segment in
+      [
+        "startSeconds": Double(segment.startTime),
+        "endSeconds": Double(segment.endTime),
+        "speakerIndex": segment.speakerId,
+      ] as [String: Any]
+    } ?? [],
+    "numSpeakers": result?.numSpeakers ?? 0,
+  ]
+  if let error {
+    payload["error"] = error
+  } else {
+    payload["error"] = NSNull()
+  }
+  return encodeJSONObject(payload)
 }
 
 private func waitForValue<T>(_ operation: @escaping () async -> T) -> T {
@@ -355,6 +437,10 @@ private actor SoniqoBridge {
 
     refreshReadyState(for: kind)
     return kind.cacheDirectoryPath()
+  }
+
+  func diarizationCacheDirectory() -> String {
+    SpeechModelKind.community1CacheDirectoryPath()
   }
 
   func modelDownloadStateJSON(modelId: String) -> String {
@@ -482,16 +568,14 @@ private actor SoniqoBridge {
       }
 
       let samples = try decodeFloatSamples(from: samplesData)
-      let partials = try session.pushAudio(samples).map { partial in
-        LivePartialPayload(
-          source: transcriptSource.rawValue,
-          text: partial.text,
-          isFinal: partial.isFinal
-        )
-      }
-      return encodeJSON(LiveAppendPayload(partials: partials, error: nil))
+      let partials = try session.pushAudio(samples)
+      return encodeLiveAppendJSON(partials: partials, source: transcriptSource.rawValue)
     } catch {
-      return encodeJSON(LiveAppendPayload(partials: [], error: error.localizedDescription))
+      return encodeLiveAppendJSON(
+        partials: [],
+        source: source,
+        error: error.localizedDescription
+      )
     }
   }
 
@@ -504,16 +588,36 @@ private actor SoniqoBridge {
         throw SoniqoBridgeError.message("No active Soniqo transcription session.")
       }
 
-      let partials = try session.finalize().map { partial in
-        LivePartialPayload(
-          source: transcriptSource.rawValue,
-          text: partial.text,
-          isFinal: partial.isFinal
-        )
-      }
-      return encodeJSON(LiveAppendPayload(partials: partials, error: nil))
+      let partials = try session.finalize()
+      return encodeLiveAppendJSON(partials: partials, source: transcriptSource.rawValue)
     } catch {
-      return encodeJSON(LiveAppendPayload(partials: [], error: error.localizedDescription))
+      return encodeLiveAppendJSON(
+        partials: [],
+        source: source,
+        error: error.localizedDescription
+      )
+    }
+  }
+
+  func diarizeAudioJSON(modelId: String, samplesData: Data, exactSpeakers: String) async -> String {
+    do {
+      guard let kind = SpeechModelKind.resolve(modelId) else {
+        throw SoniqoBridgeError.message("Unsupported Soniqo model: \(modelId)")
+      }
+      guard let speakerCount = Int(exactSpeakers), speakerCount >= 2 else {
+        throw SoniqoBridgeError.message("Soniqo diarization requires at least two speakers.")
+      }
+
+      let samples = try decodeFloatSamples(from: samplesData)
+      let pipeline = try await ensureModelLoaded(kind).asDiarizationPipeline()
+      let result = try pipeline.diarize(
+        audio: samples,
+        sampleRate: soniqoFileTranscriptionSampleRate,
+        speakerBounds: Community1SpeakerBounds(exact: speakerCount)
+      )
+      return encodeDiarizationJSON(result)
+    } catch {
+      return encodeDiarizationJSON(nil, error: error.localizedDescription)
     }
   }
 
@@ -809,6 +913,14 @@ public func _soniqo_model_cache_dir(modelId: SRString) -> SRString {
     })
 }
 
+@_cdecl("_soniqo_diarization_cache_dir")
+public func _soniqo_diarization_cache_dir() -> SRString {
+  SRString(
+    waitForValue {
+      await SoniqoBridge.shared.diarizationCacheDirectory()
+    })
+}
+
 @_cdecl("_soniqo_model_download_state")
 public func _soniqo_model_download_state(modelId: SRString) -> SRString {
   SRString(
@@ -845,6 +957,22 @@ public func _soniqo_transcribe_audio_file(
         modelId: modelId.toString(),
         audioPath: audioPath.toString(),
         language: language.toString()
+      )
+    })
+}
+
+@_cdecl("_soniqo_diarize_audio")
+public func _soniqo_diarize_audio(
+  modelId: SRString,
+  samples: SRData,
+  exactSpeakers: SRString
+) -> SRString {
+  SRString(
+    waitForValue {
+      await SoniqoBridge.shared.diarizeAudioJSON(
+        modelId: modelId.toString(),
+        samplesData: Data(samples.toArray()),
+        exactSpeakers: exactSpeakers.toString()
       )
     })
 }

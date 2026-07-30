@@ -124,7 +124,9 @@ impl SoniqoModel {
     pub const fn description(self) -> &'static str {
         match self {
             Self::ParakeetStreaming => "Realtime transcription for 25 European languages.",
-            Self::ParakeetBatch => "Batch transcription for 25 European languages.",
+            Self::ParakeetBatch => {
+                "Batch transcription with on-device speaker labels for 25 European languages."
+            }
             Self::Omnilingual => "Multilingual batch transcription.",
             Self::Qwen3Small => "Multilingual batch transcription.",
             Self::Qwen3Large => "Multilingual batch transcription.",
@@ -134,7 +136,7 @@ impl SoniqoModel {
     pub const fn size_bytes(self) -> u64 {
         match self {
             Self::ParakeetStreaming => 120 * 1024 * 1024,
-            Self::ParakeetBatch => 600 * 1024 * 1024,
+            Self::ParakeetBatch => 632 * 1024 * 1024,
             Self::Omnilingual => 300 * 1024 * 1024,
             Self::Qwen3Small => 600 * 1024 * 1024,
             Self::Qwen3Large => 1_700 * 1024 * 1024,
@@ -215,6 +217,8 @@ pub struct FileTranscript {
     pub duration_seconds: f64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chunks: Vec<FileTranscriptChunk>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub speaker_segments: Vec<DiarizationSegment>,
 }
 
 impl FileTranscript {
@@ -223,6 +227,7 @@ impl FileTranscript {
             text,
             duration_seconds,
             chunks: Vec::new(),
+            speaker_segments: Vec::new(),
         }
     }
 
@@ -237,6 +242,7 @@ impl FileTranscript {
             text,
             duration_seconds,
             chunks,
+            speaker_segments: Vec::new(),
         }
     }
 }
@@ -247,6 +253,14 @@ pub struct FileTranscriptChunk {
     pub text: String,
     pub start_seconds: f64,
     pub duration_seconds: f64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiarizationSegment {
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+    pub speaker_index: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -371,6 +385,12 @@ pub fn delete_model(model: SoniqoModel) -> Result<()> {
     if cache_dir.exists() {
         std::fs::remove_dir_all(&cache_dir).map_err(Error::Delete)?;
     }
+    if model == SoniqoModel::ParakeetBatch {
+        let cache_dir = platform::diarization_cache_dir()?;
+        if cache_dir.exists() {
+            std::fs::remove_dir_all(&cache_dir).map_err(Error::Delete)?;
+        }
+    }
 
     Ok(())
 }
@@ -429,6 +449,27 @@ pub fn transcribe_file(
     }
 
     result
+}
+
+pub fn diarize_samples(
+    model: SoniqoModel,
+    samples: &[f32],
+    exact_speakers: usize,
+) -> Result<Vec<DiarizationSegment>> {
+    ensure_supported_platform(model)?;
+    if model.batch_model() != SoniqoModel::ParakeetBatch {
+        return Err(Error::Bridge(format!(
+            "{} does not support speaker diarization",
+            model.display_name()
+        )));
+    }
+    if exact_speakers < 2 {
+        return Err(Error::Bridge(
+            "speaker diarization requires at least two speakers".to_string(),
+        ));
+    }
+
+    platform::diarize_samples(model.batch_model(), samples, exact_speakers)
 }
 
 pub struct LiveTranscriptionSession {
@@ -536,7 +577,15 @@ pub fn batch_response_from_channels(
         .iter()
         .map(|channel| channel.duration_seconds)
         .fold(0.05, f64::max);
-    let metadata = metadata_json(model, duration_seconds, channels.len() as u32);
+    let has_diarization = channels
+        .iter()
+        .any(|channel| !channel.speaker_segments.is_empty());
+    let metadata = metadata_json(
+        model,
+        duration_seconds,
+        channels.len() as u32,
+        has_diarization,
+    );
 
     batch::Response {
         metadata,
@@ -555,7 +604,11 @@ pub fn batch_response_from_channels(
                             channel_index as i32,
                         )
                     } else {
-                        batch_words_from_chunks(&channel.chunks, channel_index as i32)
+                        batch_words_from_chunks(
+                            &channel.chunks,
+                            &channel.speaker_segments,
+                            channel_index as i32,
+                        )
                     };
                     batch::Channel {
                         alternatives: vec![batch::Alternatives {
@@ -582,14 +635,23 @@ fn metadata(model: SoniqoModel) -> stream::Metadata {
     }
 }
 
-fn metadata_json(model: SoniqoModel, duration_seconds: f64, channels: u32) -> serde_json::Value {
+fn metadata_json(
+    model: SoniqoModel,
+    duration_seconds: f64,
+    channels: u32,
+    has_diarization: bool,
+) -> serde_json::Value {
     let mut value = serde_json::to_value(metadata(model)).unwrap_or_else(|_| serde_json::json!({}));
     if let Some(object) = value.as_object_mut() {
         object.insert("duration".to_string(), serde_json::json!(duration_seconds));
         object.insert("channels".to_string(), serde_json::json!(channels));
         object.insert(
             "timing_source".to_string(),
-            serde_json::json!("synthetic_text"),
+            serde_json::json!(if has_diarization {
+                "diarized_speech"
+            } else {
+                "synthetic_text"
+            }),
         );
     }
     value
@@ -627,15 +689,126 @@ fn stream_words_from_text(text: &str, start: f64, duration: f64) -> Vec<stream::
         .collect()
 }
 
-fn batch_words_from_chunks(chunks: &[FileTranscriptChunk], channel: i32) -> Vec<batch::Word> {
+fn batch_words_from_chunks(
+    chunks: &[FileTranscriptChunk],
+    speaker_segments: &[DiarizationSegment],
+    channel: i32,
+) -> Vec<batch::Word> {
     chunks
         .iter()
         .flat_map(|chunk| {
             let text = normalize_transcript_text(&chunk.text);
+            if !speaker_segments.is_empty() {
+                return batch_words_from_diarized_speech(
+                    &text,
+                    chunk.start_seconds,
+                    chunk.duration_seconds,
+                    channel,
+                    speaker_segments,
+                );
+            }
+
             let duration = synthetic_text_duration(&text)
                 .min(chunk.duration_seconds.max(MIN_SYNTHETIC_DURATION_SECONDS));
             let start = chunk.start_seconds.max(0.0);
             batch_words_from_text(&text, start, duration, channel)
+        })
+        .collect()
+}
+
+fn batch_words_from_diarized_speech(
+    text: &str,
+    start: f64,
+    duration: f64,
+    channel: i32,
+    speaker_segments: &[DiarizationSegment],
+) -> Vec<batch::Word> {
+    let words = split_words(text);
+    if words.is_empty() {
+        return Vec::new();
+    }
+
+    let chunk_start = start.max(0.0);
+    let chunk_end = chunk_start + duration.max(MIN_SYNTHETIC_DURATION_SECONDS);
+    let mut spans = speaker_segments
+        .iter()
+        .filter_map(|segment| {
+            let start = segment.start_seconds.max(chunk_start);
+            let end = segment.end_seconds.min(chunk_end);
+            (end > start).then_some((start, end, segment.speaker_index))
+        })
+        .collect::<Vec<_>>();
+    spans.sort_by(|left, right| {
+        left.0
+            .total_cmp(&right.0)
+            .then_with(|| left.1.total_cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+    let mut non_overlapping = Vec::with_capacity(spans.len());
+    let mut previous_end = chunk_start;
+    for (start, end, speaker) in spans {
+        let start = start.max(previous_end);
+        if end > start {
+            non_overlapping.push((start, end, speaker));
+            previous_end = end;
+        }
+    }
+    let spans = non_overlapping;
+
+    let active_duration = spans.iter().map(|(start, end, _)| end - start).sum::<f64>();
+    if active_duration <= 0.0 {
+        let duration =
+            synthetic_text_duration(text).min(duration.max(MIN_SYNTHETIC_DURATION_SECONDS));
+        return batch_words_from_text(text, chunk_start, duration, channel);
+    }
+
+    let position = |offset: f64| {
+        let mut remaining = offset.clamp(0.0, active_duration);
+        for (index, (start, end, speaker)) in spans.iter().enumerate() {
+            let span_duration = end - start;
+            if remaining <= span_duration || index + 1 == spans.len() {
+                return ((start + remaining.min(span_duration)), index, *speaker);
+            }
+            remaining -= span_duration;
+        }
+        (chunk_end, spans.len() - 1, spans[spans.len() - 1].2)
+    };
+    let count = words.len();
+
+    words
+        .into_iter()
+        .enumerate()
+        .map(|(index, word)| {
+            let start_offset = index as f64 / count as f64 * active_duration;
+            let end_offset = (index + 1) as f64 / count as f64 * active_duration;
+            let midpoint_offset = (start_offset + end_offset) / 2.0;
+            let (mapped_start, _, _) = position(start_offset);
+            let (mapped_end, _, _) = position(end_offset);
+            let (midpoint, span_index, speaker) = position(midpoint_offset);
+            let (span_start, span_end, _) = spans[span_index];
+            let word_start = mapped_start.max(span_start).min(span_end);
+            let word_end = mapped_end
+                .min(span_end)
+                .max((word_start + MIN_SYNTHETIC_DURATION_SECONDS).min(span_end));
+            let (word_start, word_end) = if word_end > word_start {
+                (word_start, word_end)
+            } else {
+                let half = MIN_SYNTHETIC_DURATION_SECONDS / 2.0;
+                (
+                    (midpoint - half).max(span_start),
+                    (midpoint + half).min(span_end),
+                )
+            };
+
+            batch::Word {
+                word: word.to_string(),
+                start: word_start,
+                end: word_end.max(word_start + f64::EPSILON),
+                confidence: 1.0,
+                channel,
+                speaker: Some(speaker),
+                punctuated_word: Some(word.to_string()),
+            }
         })
         .collect()
 }
@@ -688,6 +861,7 @@ mod platform {
     use swift_rs::{Bool, SRData, SRString, swift};
 
     swift!(fn _soniqo_model_cache_dir(model_id: &SRString) -> SRString);
+    swift!(fn _soniqo_diarization_cache_dir() -> SRString);
     swift!(fn _soniqo_model_download_state(model_id: &SRString) -> SRString);
     swift!(fn _soniqo_model_start_download(model_id: &SRString) -> Bool);
     swift!(fn _soniqo_model_reset(model_id: &SRString) -> Bool);
@@ -695,6 +869,11 @@ mod platform {
         model_id: &SRString,
         audio_path: &SRString,
         language: &SRString
+    ) -> SRString);
+    swift!(fn _soniqo_diarize_audio(
+        model_id: &SRString,
+        samples: &SRData,
+        exact_speakers: &SRString
     ) -> SRString);
     swift!(fn _soniqo_live_start(model_id: &SRString) -> SRString);
     swift!(fn _soniqo_live_append(source: &SRString, samples: &SRData) -> SRString);
@@ -716,6 +895,14 @@ mod platform {
     }
 
     #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DiarizationPayload {
+        segments: Vec<DiarizationSegment>,
+        num_speakers: usize,
+        error: Option<String>,
+    }
+
+    #[derive(serde::Deserialize)]
     struct StatusPayload {
         running: bool,
         error: Option<String>,
@@ -731,6 +918,19 @@ mod platform {
                 "cache path unavailable for {}",
                 model.as_str()
             )));
+        }
+
+        Ok(PathBuf::from(path))
+    }
+
+    pub(super) fn diarization_cache_dir() -> Result<PathBuf> {
+        let path = unsafe { _soniqo_diarization_cache_dir() };
+        let path = path.as_str().to_string();
+
+        if path.is_empty() {
+            return Err(Error::Bridge(
+                "Soniqo diarization cache path unavailable".to_string(),
+            ));
         }
 
         Ok(PathBuf::from(path))
@@ -787,7 +987,32 @@ mod platform {
             text: result.text,
             duration_seconds: result.duration_seconds,
             chunks: Vec::new(),
+            speaker_segments: Vec::new(),
         })
+    }
+
+    pub(super) fn diarize_samples(
+        model: SoniqoModel,
+        samples: &[f32],
+        exact_speakers: usize,
+    ) -> Result<Vec<DiarizationSegment>> {
+        let model_id = sr_string(model.as_str());
+        let samples = floats_to_sr_data(samples);
+        let exact_speakers_value = sr_string(&exact_speakers.to_string());
+        let payload = unsafe { _soniqo_diarize_audio(&model_id, &samples, &exact_speakers_value) };
+        let result: DiarizationPayload = serde_json::from_str(payload.as_str())?;
+
+        if let Some(error) = result.error {
+            return Err(Error::Bridge(error));
+        }
+        if result.num_speakers != exact_speakers {
+            return Err(Error::Bridge(format!(
+                "Soniqo diarization returned {} speakers instead of {}",
+                result.num_speakers, exact_speakers
+            )));
+        }
+
+        Ok(result.segments)
     }
 
     pub(super) fn live_start(model: SoniqoModel) -> Result<()> {
@@ -864,6 +1089,10 @@ mod platform {
         Err(Error::UnsupportedPlatform)
     }
 
+    pub(super) fn diarization_cache_dir() -> Result<PathBuf> {
+        Err(Error::UnsupportedPlatform)
+    }
+
     pub(super) fn model_download_state(_model: SoniqoModel) -> Result<ModelDownloadState> {
         Err(Error::UnsupportedPlatform)
     }
@@ -881,6 +1110,14 @@ mod platform {
         _path: &Path,
         _language: &str,
     ) -> Result<FileTranscript> {
+        Err(Error::UnsupportedPlatform)
+    }
+
+    pub(super) fn diarize_samples(
+        _model: SoniqoModel,
+        _samples: &[f32],
+        _exact_speakers: usize,
+    ) -> Result<Vec<DiarizationSegment>> {
         Err(Error::UnsupportedPlatform)
     }
 
@@ -1093,6 +1330,42 @@ mod tests {
         assert_eq!(words[2].start, 29.5);
         assert_eq!(words[3].start, 29.5 + SYNTHETIC_BATCH_WORD_SECONDS);
         assert_eq!(response.metadata["timing_source"], "synthetic_text");
+    }
+
+    #[test]
+    fn batch_response_aligns_words_to_diarized_speech() {
+        let mut transcript = FileTranscript::from_chunks(
+            vec![FileTranscriptChunk {
+                text: "lex one two george three four".to_string(),
+                start_seconds: 0.0,
+                duration_seconds: 10.0,
+            }],
+            10.0,
+        );
+        transcript.speaker_segments = vec![
+            DiarizationSegment {
+                start_seconds: 1.0,
+                end_seconds: 4.0,
+                speaker_index: 0,
+            },
+            DiarizationSegment {
+                start_seconds: 6.0,
+                end_seconds: 9.0,
+                speaker_index: 1,
+            },
+        ];
+
+        let response = batch_response_from_channels(SoniqoModel::ParakeetBatch, vec![transcript]);
+        let words = &response.results.channels[0].alternatives[0].words;
+
+        assert_eq!(
+            words.iter().map(|word| word.speaker).collect::<Vec<_>>(),
+            vec![Some(0), Some(0), Some(0), Some(1), Some(1), Some(1)]
+        );
+        assert!(words.windows(2).all(|pair| pair[0].start <= pair[1].start));
+        assert!(words[0].start >= 1.0);
+        assert!(words[3].start >= 6.0);
+        assert_eq!(response.metadata["timing_source"], "diarized_speech");
     }
 
     #[test]

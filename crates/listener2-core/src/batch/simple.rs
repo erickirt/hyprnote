@@ -302,6 +302,7 @@ pub(super) async fn run_soniqo_batch(
             .first()
             .map(anlg_language::Language::bcp47_code);
         let language_hint = soniqo_language_hint(language.as_deref());
+        let num_speakers = listen_params.num_speakers;
         let language_label = language.as_deref().unwrap_or("auto").to_string();
         let language_hint_label = language_hint.as_deref().unwrap_or("auto").to_string();
         let started_at = Instant::now();
@@ -321,7 +322,13 @@ pub(super) async fn run_soniqo_batch(
                 runtime,
                 session_id,
             };
-            transcribe_soniqo_file(model, &file_path, language_hint.as_deref(), Some(&progress))
+            transcribe_soniqo_file(
+                model,
+                &file_path,
+                language_hint.as_deref(),
+                num_speakers,
+                Some(&progress),
+            )
         })
         .await
         .map_err(|e| {
@@ -375,6 +382,7 @@ fn transcribe_soniqo_file(
     model: anlg_transcribe_soniqo::SoniqoModel,
     file_path: &str,
     language: Option<&str>,
+    num_speakers: Option<u32>,
     progress: Option<&SoniqoProgressReporter>,
 ) -> std::result::Result<Vec<anlg_transcribe_soniqo::FileTranscript>, String> {
     let source = anlg_audio_utils::source_from_path(file_path).map_err(|e| e.to_string())?;
@@ -438,9 +446,9 @@ fn transcribe_soniqo_file(
     );
 
     let plans = channel_samples
-        .into_iter()
+        .iter()
         .enumerate()
-        .map(|(channel_index, samples)| soniqo_channel_plan(model, channel_index, &samples))
+        .map(|(channel_index, samples)| soniqo_channel_plan(model, channel_index, samples))
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let total_chunks = plans.iter().map(|plan| plan.chunks.len()).sum::<usize>();
     let mut completed_chunks = 0usize;
@@ -449,14 +457,55 @@ fn transcribe_soniqo_file(
         progress.emit(soniqo_batch_progress(0, total_chunks));
     }
 
-    collect_soniqo_channel_transcripts(plans.into_iter().map(|plan| {
+    let mut transcripts = collect_soniqo_channel_transcripts(plans.into_iter().map(|plan| {
         transcribe_soniqo_channel_chunks(model, plan, language, || {
             completed_chunks += 1;
             if let Some(progress) = progress {
                 progress.emit(soniqo_batch_progress(completed_chunks, total_chunks));
             }
         })
-    }))
+    }))?;
+
+    for (channel_index, (transcript, samples)) in transcripts
+        .iter_mut()
+        .zip(channel_samples.iter())
+        .enumerate()
+    {
+        let Some(speaker_count) =
+            soniqo_diarization_speaker_count(num_speakers, channel_samples.len(), channel_index)
+        else {
+            continue;
+        };
+
+        let started_at = Instant::now();
+        match anlg_transcribe_soniqo::diarize_samples(model, samples, speaker_count) {
+            Ok(segments) => {
+                tracing::info!(
+                    anarlog.stt.provider.name = "soniqo",
+                    anarlog.stt.model = %model,
+                    channel.index = channel_index,
+                    speaker.count = speaker_count,
+                    segment.count = segments.len(),
+                    elapsed_ms = started_at.elapsed().as_millis() as u64,
+                    "soniqo_channel_diarization_completed"
+                );
+                transcript.speaker_segments = segments;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    anarlog.stt.provider.name = "soniqo",
+                    anarlog.stt.model = %model,
+                    channel.index = channel_index,
+                    speaker.count = speaker_count,
+                    elapsed_ms = started_at.elapsed().as_millis() as u64,
+                    error = %error,
+                    "soniqo_channel_diarization_failed"
+                );
+            }
+        }
+    }
+
+    Ok(transcripts)
 }
 
 struct SoniqoProgressReporter {
@@ -506,6 +555,22 @@ fn soniqo_batch_progress(completed_chunks: usize, total_chunks: usize) -> f64 {
 
     let ratio = completed_chunks as f64 / total_chunks as f64;
     (SONIQO_PROGRESS_PLANNED + ratio * SONIQO_PROGRESS_RANGE).min(SONIQO_PROGRESS_MAX)
+}
+
+fn soniqo_diarization_speaker_count(
+    num_speakers: Option<u32>,
+    channel_count: usize,
+    channel_index: usize,
+) -> Option<usize> {
+    let total = usize::try_from(num_speakers?).ok()?;
+
+    let count = match channel_count {
+        1 => total,
+        2 if channel_index == 1 => total.saturating_sub(1),
+        _ => return None,
+    };
+
+    (count >= 2).then_some(count)
 }
 
 fn collect_soniqo_channel_transcripts<I>(
@@ -984,6 +1049,19 @@ mod tests {
         assert!(!uses_resilient_soniqo_chunking(
             anlg_transcribe_soniqo::SoniqoModel::Omnilingual
         ));
+    }
+
+    #[test]
+    fn soniqo_diarization_uses_remote_count_for_system_channel() {
+        assert_eq!(soniqo_diarization_speaker_count(Some(3), 2, 0), None);
+        assert_eq!(soniqo_diarization_speaker_count(Some(3), 2, 1), Some(2));
+    }
+
+    #[test]
+    fn soniqo_diarization_uses_total_count_for_mono_audio() {
+        assert_eq!(soniqo_diarization_speaker_count(Some(2), 1, 0), Some(2));
+        assert_eq!(soniqo_diarization_speaker_count(Some(1), 1, 0), None);
+        assert_eq!(soniqo_diarization_speaker_count(None, 1, 0), None);
     }
 
     #[test]
