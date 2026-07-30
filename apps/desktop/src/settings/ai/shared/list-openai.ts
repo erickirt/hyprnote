@@ -75,6 +75,7 @@ export async function listOpenAIModels(
 export async function listGenericModels(
   baseUrl: string,
   apiKey: string,
+  options?: { filterDateSnapshots?: boolean },
 ): Promise<ListModelsResult> {
   if (!baseUrl) {
     return DEFAULT_RESULT;
@@ -83,40 +84,45 @@ export async function listGenericModels(
   return pipe(
     fetchJson(`${baseUrl}/models`, { Authorization: `Bearer ${apiKey}` }),
     Effect.andThen((json) => Schema.decodeUnknown(OpenAIModelSchema)(json)),
-    Effect.map(({ data }) => {
-      const result = partition(
-        data,
-        (model) => {
-          const reasons: ModelIgnoreReason[] = [];
-          if (shouldIgnoreCommonKeywords(model.id)) {
-            reasons.push("common_keyword");
-          }
-          if (isNonChatModel(model.id)) {
-            reasons.push("not_chat_model");
-          }
-          if (isOldModel(model.id)) {
-            reasons.push("old_model");
-          }
-          if (isDateSnapshot(model.id)) {
-            reasons.push("date_snapshot");
-          }
-          return reasons.length > 0 ? reasons : null;
-        },
-        (model) => model.id,
-      );
-
-      return {
-        models: sortModelsByRecency(result.models),
-        ignored: result.ignored,
-        metadata: extractMetadataMap(
-          data,
-          (model) => model.id,
-          () => ({ input_modalities: ["text"] }),
-        ),
-      };
-    }),
+    Effect.map(({ data }) => processGenericModels(data, options)),
     Effect.timeout(REQUEST_TIMEOUT),
     Effect.catchAll(() => Effect.succeed(DEFAULT_RESULT)),
     Effect.runPromise,
   );
+}
+
+export function processGenericModels(
+  data: readonly { id: string }[],
+  options?: { filterDateSnapshots?: boolean },
+): ListModelsResult {
+  const result = partition(
+    data,
+    (model) => {
+      const reasons: ModelIgnoreReason[] = [];
+      if (shouldIgnoreCommonKeywords(model.id)) {
+        reasons.push("common_keyword");
+      }
+      if (isNonChatModel(model.id)) {
+        reasons.push("not_chat_model");
+      }
+      if (isOldModel(model.id)) {
+        reasons.push("old_model");
+      }
+      if (options?.filterDateSnapshots !== false && isDateSnapshot(model.id)) {
+        reasons.push("date_snapshot");
+      }
+      return reasons.length > 0 ? reasons : null;
+    },
+    (model) => model.id,
+  );
+
+  return {
+    models: sortModelsByRecency(result.models),
+    ignored: result.ignored,
+    metadata: extractMetadataMap(
+      data,
+      (model) => model.id,
+      () => ({ input_modalities: ["text"] }),
+    ),
+  };
 }

@@ -502,6 +502,10 @@ export function getLlmProviderStatus({
     case "openai":
       listModelsFunc = () => listOpenAIModels(baseUrl, apiKey);
       break;
+    case "cohere":
+      listModelsFunc = () =>
+        listGenericModels(baseUrl, apiKey, { filterDateSnapshots: false });
+      break;
     case "cloudflare_workers_ai":
       listModelsFunc = () => listCloudflareWorkersAIModels(baseUrl, apiKey);
       break;
