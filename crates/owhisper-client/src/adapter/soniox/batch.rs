@@ -87,20 +87,33 @@ impl SonioxAdapter {
             "soniox_transcription_created"
         );
 
-        soniox::wait_for_completion(client, &transcription_id, api_key)
-            .await
-            .map_err(soniox_err)?;
-        tracing::info!(
-            anarlog.stt.job.id = %transcription_id,
-            "soniox_transcription_completed"
-        );
+        let result = async {
+            soniox::wait_for_completion(client, &transcription_id, api_key)
+                .await
+                .map_err(soniox_err)?;
+            tracing::info!(
+                anarlog.stt.job.id = %transcription_id,
+                "soniox_transcription_completed"
+            );
 
-        let transcript = soniox::fetch_transcript(client, &transcription_id, api_key)
-            .await
-            .map_err(soniox_err)?;
-        tracing::info!("transcript fetched successfully");
+            let transcript = soniox::fetch_transcript(client, &transcription_id, api_key)
+                .await
+                .map_err(soniox_err)?;
+            tracing::info!("transcript fetched successfully");
 
-        Ok(Self::to_batch_response(transcript))
+            Ok(Self::to_batch_response(transcript))
+        }
+        .await;
+
+        if let Err(e) = soniox::delete_transcription(client, &transcription_id, api_key).await {
+            tracing::warn!(
+                anarlog.stt.job.id = %transcription_id,
+                error = %e,
+                "failed_to_delete_soniox_transcription"
+            );
+        }
+
+        result
     }
 
     fn to_batch_response(transcript: soniox::TranscriptResponse) -> BatchResponse {
