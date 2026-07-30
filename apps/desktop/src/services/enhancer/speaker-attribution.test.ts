@@ -240,6 +240,62 @@ ${JSON.stringify({
     ).toHaveLength(2);
   });
 
+  it("retries a semantically invalid one-to-one mapping with validator feedback", async () => {
+    mocks.generateText
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          mappings: [
+            {
+              cluster_id: "transcript-1:0",
+              human_id: "human-lex",
+              confidence: 0.98,
+              evidence_id: "evidence-1",
+            },
+            {
+              cluster_id: "transcript-1:1",
+              human_id: "human-lex",
+              confidence: 0.97,
+              evidence_id: "evidence-1",
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          mappings: [
+            {
+              cluster_id: "transcript-1:0",
+              human_id: "human-lex",
+              confidence: 0.98,
+              evidence_id: "evidence-1",
+            },
+            {
+              cluster_id: "transcript-1:1",
+              human_id: "human-george",
+              confidence: 0.97,
+              evidence_id: "evidence-1",
+            },
+          ],
+        }),
+      });
+
+    const updates = await inferAutomaticSpeakerAssignments({
+      generatedSummary:
+        "Lex Fridman asked about Llama. George Hotz discussed open source.",
+      model: {} as LanguageModel,
+      snapshot: createSnapshot(),
+      signal: new AbortController().signal,
+    });
+
+    expect(mocks.generateText).toHaveBeenCalledTimes(2);
+    expect(
+      JSON.parse(mocks.generateText.mock.calls[1]![0].prompt),
+    ).toMatchObject({
+      retry_reason: "duplicate_human",
+    });
+    expect(updates).toHaveLength(1);
+  });
+
   it("attributes recurring participants independently in each transcript", async () => {
     const snapshot = createSnapshot();
     const source = snapshot.transcripts[0]!;
@@ -374,7 +430,7 @@ ${JSON.stringify({
     ];
 
     for (const mappings of invalidMappings) {
-      mocks.generateText.mockResolvedValueOnce({
+      mocks.generateText.mockReset().mockResolvedValue({
         text: `\`\`\`json\n${JSON.stringify({ mappings })}\n\`\`\``,
       });
       await expect(

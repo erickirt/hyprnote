@@ -25,6 +25,7 @@ const SONIQO_PARAKEET_MAX_CHUNK_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 5
 const SONIQO_PROGRESS_PLANNED: f64 = 0.05;
 const SONIQO_PROGRESS_RANGE: f64 = 0.90;
 const SONIQO_PROGRESS_MAX: f64 = 0.95;
+const SONIQO_DIRECT_MIC_MIN_RMS: f64 = 0.0008;
 const DIRECT_BATCH_TIMEOUT_FLOOR: Duration = Duration::from_secs(15 * 60);
 const DIRECT_BATCH_TIMEOUT_CEILING: Duration = Duration::from_secs(6 * 60 * 60);
 const DIRECT_BATCH_TIMEOUT_BUFFER: Duration = Duration::from_secs(5 * 60);
@@ -445,10 +446,18 @@ fn transcribe_soniqo_file(
         "soniqo_channels_prepared"
     );
 
+    let transcribed_channel_count = channel_samples.len();
     let plans = channel_samples
         .iter()
         .enumerate()
-        .map(|(channel_index, samples)| soniqo_channel_plan(model, channel_index, samples))
+        .map(|(channel_index, samples)| {
+            soniqo_channel_plan(
+                model,
+                channel_index,
+                samples,
+                transcribed_channel_count == 2 && channel_index == 0,
+            )
+        })
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let total_chunks = plans.iter().map(|plan| plan.chunks.len()).sum::<usize>();
     let mut completed_chunks = 0usize;
@@ -528,6 +537,7 @@ impl SoniqoProgressReporter {
 struct SoniqoChannelPlan {
     channel_index: usize,
     duration_seconds: f64,
+    is_direct_mic: bool,
     chunks: Vec<AudioChunk>,
 }
 
@@ -617,6 +627,7 @@ fn soniqo_channel_plan(
     model: anlg_transcribe_soniqo::SoniqoModel,
     channel_index: usize,
     samples: &[f32],
+    is_direct_mic: bool,
 ) -> std::result::Result<SoniqoChannelPlan, String> {
     let duration_seconds = channel_duration_sec(samples);
     let chunks = soniqo_channel_chunks(model, samples)?;
@@ -633,6 +644,7 @@ fn soniqo_channel_plan(
     Ok(SoniqoChannelPlan {
         channel_index,
         duration_seconds,
+        is_direct_mic,
         chunks,
     })
 }
@@ -648,10 +660,26 @@ fn transcribe_soniqo_channel_chunks(
     let mut successful_chunks = 0usize;
     let mut failed_chunks = 0usize;
     let channel_index = plan.channel_index;
+    let is_direct_mic = plan.is_direct_mic;
 
     for (chunk_index, chunk) in plan.chunks.into_iter().enumerate() {
         let chunk_duration_ms =
             (chunk.sample_end - chunk.sample_start) * 1000 / TARGET_SAMPLE_RATE as usize;
+        let chunk_rms = audio_rms(&chunk.samples);
+        if is_direct_mic && chunk_rms < SONIQO_DIRECT_MIC_MIN_RMS {
+            on_chunk_completed();
+            tracing::info!(
+                anarlog.stt.provider.name = "soniqo",
+                anarlog.stt.model = %model,
+                channel.index = channel_index,
+                chunk.index = chunk_index,
+                audio.rms = chunk_rms,
+                audio.minimum_rms = SONIQO_DIRECT_MIC_MIN_RMS,
+                "soniqo_direct_mic_chunk_skipped"
+            );
+            continue;
+        }
+
         let chunk_started_at = Instant::now();
         tracing::info!(
             anarlog.stt.provider.name = "soniqo",
@@ -737,6 +765,18 @@ fn transcribe_soniqo_channel_chunks(
         transcript_chunks,
         plan.duration_seconds,
     ))
+}
+
+fn audio_rms(samples: &[f32]) -> f64 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+
+    let sum_of_squares = samples
+        .iter()
+        .map(|sample| f64::from(*sample).powi(2))
+        .sum::<f64>();
+    (sum_of_squares / samples.len() as f64).sqrt()
 }
 
 fn transcribe_soniqo_samples(
@@ -1021,6 +1061,12 @@ mod tests {
         assert_eq!(chunks[1].sample_end, SONIQO_PARAKEET_MAX_CHUNK_SAMPLES * 2);
         assert_eq!(chunks[2].sample_start, chunks[1].sample_end);
         assert_eq!(chunks[2].samples.len(), TARGET_SAMPLE_RATE as usize);
+    }
+
+    #[test]
+    fn direct_mic_gate_rejects_only_quiet_chunks() {
+        assert!(audio_rms(&[0.0007; 100]) < SONIQO_DIRECT_MIC_MIN_RMS);
+        assert!(audio_rms(&[0.0009; 100]) >= SONIQO_DIRECT_MIC_MIN_RMS);
     }
 
     #[test]
