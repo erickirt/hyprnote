@@ -10681,6 +10681,7 @@ dependencies = [
  "host",
  "hound",
  "language",
+ "mp3",
  "owhisper-client",
  "owhisper-interface",
  "ractor",

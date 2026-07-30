@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -30,6 +30,23 @@ const DIRECT_BATCH_TIMEOUT_FLOOR: Duration = Duration::from_secs(15 * 60);
 const DIRECT_BATCH_TIMEOUT_CEILING: Duration = Duration::from_secs(6 * 60 * 60);
 const DIRECT_BATCH_TIMEOUT_BUFFER: Duration = Duration::from_secs(5 * 60);
 const DIRECT_BATCH_AUDIO_DURATION_MULTIPLIER: u32 = 2;
+const ANARLOG_PROXY_MAX_AUDIO_BYTES: u64 = 512 * 1024 * 1024;
+
+enum PreparedBatchUpload {
+    Original(PathBuf),
+    Compressed {
+        _temp_dir: tempfile::TempDir,
+        path: PathBuf,
+    },
+}
+
+impl PreparedBatchUpload {
+    fn path(&self) -> &Path {
+        match self {
+            Self::Original(path) | Self::Compressed { path, .. } => path,
+        }
+    }
+}
 
 macro_rules! dispatch_batch {
     ($ak:expr, $params:expr, $lp:expr,
@@ -54,6 +71,10 @@ pub(super) async fn run_direct_batch_for_adapter_kind(
     params: BatchParams,
     listen_params: owhisper_interface::ListenParams,
 ) -> crate::Result<BatchRunOutput> {
+    if adapter_kind == AdapterKind::Anarlog {
+        return run_anarlog_batch(params, listen_params).await;
+    }
+
     dispatch_batch!(adapter_kind, params, listen_params, {
         Argmax => ArgmaxAdapter,
         Cartesia => CartesiaAdapter,
@@ -78,6 +99,93 @@ pub(super) async fn run_direct_batch_for_adapter_kind(
         Together => TogetherAdapter,
         Xai => XaiAdapter,
     }, unsupported: [DashScope])
+}
+
+async fn run_anarlog_batch(
+    mut params: BatchParams,
+    listen_params: owhisper_interface::ListenParams,
+) -> crate::Result<BatchRunOutput> {
+    let upload =
+        prepare_anarlog_batch_upload(&params.file_path, ANARLOG_PROXY_MAX_AUDIO_BYTES).await?;
+    params.file_path = upload.path().to_string_lossy().into_owned();
+    run_direct_batch::<AnarlogAdapter>(&AdapterKind::Anarlog.to_string(), params, listen_params)
+        .await
+}
+
+async fn prepare_anarlog_batch_upload(
+    file_path: &str,
+    max_bytes: u64,
+) -> crate::Result<PreparedBatchUpload> {
+    let source_path = PathBuf::from(file_path);
+    let source_size = tokio::fs::metadata(&source_path).await?.len();
+    if source_size <= max_bytes {
+        return Ok(PreparedBatchUpload::Original(source_path));
+    }
+
+    let is_wav = source_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("wav"));
+    if !is_wav {
+        return Err(crate::BatchFailure::DirectRequestFailed {
+            provider: AdapterKind::Anarlog.to_string(),
+            message:
+                "This recording is too large for cloud transcription. Convert it to MP3 and try again."
+                    .to_string(),
+        }
+        .into());
+    }
+
+    let temp_dir = tempfile::tempdir().map_err(|error| {
+        tracing::error!(%error, "large_batch_audio_temp_dir_failed");
+        crate::BatchFailure::DirectRequestFailed {
+            provider: AdapterKind::Anarlog.to_string(),
+            message: "Anarlog couldn't prepare this large recording for transcription.".to_string(),
+        }
+    })?;
+    let encoded_path = temp_dir.path().join("audio.mp3");
+    let encode_source = source_path.clone();
+    let encode_target = encoded_path.clone();
+    tokio::task::spawn_blocking(move || anlg_mp3::encode_wav(&encode_source, &encode_target))
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "large_batch_audio_encode_task_failed");
+            crate::BatchFailure::DirectRequestFailed {
+                provider: AdapterKind::Anarlog.to_string(),
+                message: "Anarlog couldn't prepare this large recording for transcription."
+                    .to_string(),
+            }
+        })?
+        .map_err(|error| {
+            tracing::error!(%error, "large_batch_audio_encode_failed");
+            crate::BatchFailure::DirectRequestFailed {
+                provider: AdapterKind::Anarlog.to_string(),
+                message: "Anarlog couldn't prepare this large recording for transcription."
+                    .to_string(),
+            }
+        })?;
+
+    let encoded_size = tokio::fs::metadata(&encoded_path).await?.len();
+    if encoded_size > max_bytes {
+        return Err(crate::BatchFailure::DirectRequestFailed {
+            provider: AdapterKind::Anarlog.to_string(),
+            message:
+                "This recording is too large for cloud transcription. Split it into smaller files and try again."
+                    .to_string(),
+        }
+        .into());
+    }
+
+    tracing::info!(
+        source_size,
+        encoded_size,
+        "large_batch_audio_compressed_for_upload"
+    );
+
+    Ok(PreparedBatchUpload::Compressed {
+        _temp_dir: temp_dir,
+        path: encoded_path,
+    })
 }
 
 async fn run_direct_batch<A: BatchSttAdapter>(
@@ -948,6 +1056,20 @@ mod tests {
         writer.finalize().unwrap();
     }
 
+    fn write_test_wav_samples(path: &Path, samples: usize) {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: TARGET_SAMPLE_RATE,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let mut writer = hound::WavWriter::create(path, spec).unwrap();
+        for _ in 0..samples {
+            writer.write_sample(0.0f32).unwrap();
+        }
+        writer.finalize().unwrap();
+    }
+
     #[test]
     fn direct_timeout_scales_with_audio_duration_and_is_bounded() {
         assert_eq!(
@@ -962,6 +1084,36 @@ mod tests {
             direct_batch_timeout_for_audio(Some(Duration::from_secs(24 * 60 * 60))),
             DIRECT_BATCH_TIMEOUT_CEILING
         );
+    }
+
+    #[tokio::test]
+    async fn compresses_oversized_legacy_wav_before_anarlog_upload() {
+        let source = tempfile::Builder::new().suffix(".wav").tempfile().unwrap();
+        write_test_wav_samples(source.path(), TARGET_SAMPLE_RATE as usize);
+        let source_size = std::fs::metadata(source.path()).unwrap().len();
+        let max_bytes = source_size / 2;
+
+        let upload = prepare_anarlog_batch_upload(source.path().to_str().unwrap(), max_bytes)
+            .await
+            .unwrap();
+
+        assert_eq!(upload.path().extension().unwrap(), "mp3");
+        assert!(std::fs::metadata(upload.path()).unwrap().len() <= max_bytes);
+        assert!(source.path().exists());
+    }
+
+    #[tokio::test]
+    async fn keeps_anarlog_uploads_that_fit_without_reencoding() {
+        let source = tempfile::Builder::new().suffix(".wav").tempfile().unwrap();
+        write_test_wav(source.path());
+        let source_path = source.path().to_path_buf();
+        let max_bytes = std::fs::metadata(&source_path).unwrap().len();
+
+        let upload = prepare_anarlog_batch_upload(source_path.to_str().unwrap(), max_bytes)
+            .await
+            .unwrap();
+
+        assert_eq!(upload.path(), source_path);
     }
 
     #[tokio::test]
