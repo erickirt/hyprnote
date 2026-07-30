@@ -58,4 +58,4 @@ jobs:
             --path=/anarlog/llm \
             -- cargo test -p llm-proxy --test proxy_e2e proxy_e2e::openrouter -- --ignored --nocapture
         env:
-          INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
+          INFISICAL_TOKEN: ${{ secrets.INFISICAL_LLM_TOKEN }}
