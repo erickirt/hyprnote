@@ -17,6 +17,9 @@ describe("displayLlmModelId", () => {
     expect(
       displayLlmModelId("openrouter", "mistralai/mistral-large-2512"),
     ).toBe("Mistral Large");
+    expect(displayLlmModelId("amazon_bedrock", "anthropic.claude-opus-5")).toBe(
+      "Claude Opus 5",
+    );
   });
 
   test("formats common model families without changing stored ids", () => {

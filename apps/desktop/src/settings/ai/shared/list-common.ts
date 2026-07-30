@@ -1,6 +1,8 @@
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { Effect } from "effect";
 
+import { modelName } from "./model-id";
+
 export type ModelIgnoreReason =
   | "common_keyword"
   | "old_model"
@@ -101,37 +103,6 @@ export const isDateSnapshot = (id: string): boolean => {
   return false;
 };
 
-const modelName = (id: string): string => {
-  const name = id.toLowerCase().split("/").pop()!;
-  const segments = name.split(".");
-  const providerIndex = segments.findIndex((segment) =>
-    [
-      "ai21",
-      "amazon",
-      "anthropic",
-      "cohere",
-      "deepseek",
-      "google",
-      "meta",
-      "minimax",
-      "mistral",
-      "moonshot",
-      "nvidia",
-      "openai",
-      "qwen",
-      "stability",
-      "twelvelabs",
-      "writer",
-      "xai",
-      "zai",
-    ].includes(segment),
-  );
-
-  return providerIndex >= 0 && providerIndex < segments.length - 1
-    ? segments.slice(providerIndex + 1).join(".")
-    : name;
-};
-
 export const isNonChatModel = (id: string): boolean => {
   const lowerId = id.toLowerCase();
   const name = modelName(id);
@@ -201,7 +172,7 @@ export const isOldModel = (id: string): boolean => {
 
 export const sortModelsByRecency = (models: string[]): string[] => {
   const priority = (model: string) => {
-    const normalized = model.toLowerCase();
+    const normalized = modelName(model);
     const index = modelPriorityPatterns.findIndex((pattern) =>
       pattern.test(normalized),
     );

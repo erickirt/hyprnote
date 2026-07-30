@@ -1,3 +1,5 @@
+import { modelName } from "./model-id";
+
 const MODEL_NAME_OVERRIDES: Record<string, string> = {
   "chat-latest": "Chat Latest",
   "gpt-chat-latest": "GPT Chat Latest",
@@ -10,8 +12,7 @@ export function displayLlmModelId(providerId: string, model: string): string {
     return "Pro (Cloud)";
   }
 
-  const modelId = lastModelPathSegment(model);
-  const normalized = stripReleaseDate(modelId.toLowerCase());
+  const normalized = stripReleaseDate(modelName(model));
 
   const override = MODEL_NAME_OVERRIDES[normalized];
   if (override) {
@@ -44,12 +45,6 @@ export function displayLlmModelId(providerId: string, model: string): string {
   }
 
   return titleizeModelId(normalized);
-}
-
-function lastModelPathSegment(model: string) {
-  return (
-    model.trim().replace(/^~/, "").split("/").filter(Boolean).pop() ?? model
-  );
 }
 
 function stripReleaseDate(modelId: string) {

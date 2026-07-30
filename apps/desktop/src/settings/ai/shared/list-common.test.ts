@@ -105,4 +105,10 @@ describe("sortModelsByRecency", () => {
       "google/gemini-3.5-flash-lite",
     ]);
   });
+
+  test("prioritizes current models with dotted Bedrock prefixes", () => {
+    expect(
+      sortModelsByRecency(["custom-model", "anthropic.claude-sonnet-5"]),
+    ).toEqual(["anthropic.claude-sonnet-5", "custom-model"]);
+  });
 });
