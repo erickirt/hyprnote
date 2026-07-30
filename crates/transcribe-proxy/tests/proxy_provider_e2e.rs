@@ -31,7 +31,8 @@ async fn run_passthrough_live_test<A: RealtimeSttAdapter>(provider: Provider) {
         .api_base(format!("http://{}", addr))
         .params(params)
         .build_single()
-        .await;
+        .await
+        .unwrap();
 
     run_live_stream_test(client, provider_name, sample_rate).await;
 }
@@ -63,7 +64,8 @@ async fn run_anarlog_live_test(provider: Provider) {
         .api_base(format!("http://{}", addr))
         .params(params)
         .build_single()
-        .await;
+        .await
+        .unwrap();
 
     run_live_stream_test(client, provider_name, sample_rate).await;
 }

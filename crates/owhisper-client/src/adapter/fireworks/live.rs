@@ -315,7 +315,8 @@ mod tests {
                 ..Default::default()
             })
             .build_single()
-            .await;
+            .await
+            .unwrap();
 
         run_single_test(client, "fireworks").await;
     }
@@ -332,7 +333,8 @@ mod tests {
                 ..Default::default()
             })
             .build_dual()
-            .await;
+            .await
+            .unwrap();
 
         run_dual_test(client, "fireworks").await;
     }

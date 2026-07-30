@@ -14,9 +14,30 @@ use owhisper_interface::stream::Extra;
 use owhisper_interface::{ControlMessage, MixedMessage};
 
 use super::stream::process_stream;
-use super::{ChannelSender, DEVICE_FINGERPRINT_HEADER, ListenerArgs, ListenerMsg, actor_error};
+use super::{
+    ChannelSender, DEVICE_FINGERPRINT_HEADER, ListenerArgs, ListenerMsg, actor_error,
+    actor_error_with_degraded,
+};
 
-use crate::SessionErrorEvent;
+use crate::{DegradedError, SessionErrorEvent};
+
+fn client_build_error(args: &ListenerArgs, error: owhisper_client::Error) -> ActorProcessingErr {
+    let message = error.to_string();
+    args.runtime.emit_error(SessionErrorEvent::ConnectionError {
+        session_id: args.session_id.clone(),
+        error: message.clone(),
+    });
+
+    match error {
+        owhisper_client::Error::ProviderConfiguration { provider, message } => {
+            actor_error_with_degraded(
+                format!("listen_provider_configuration_failed: {provider}: {message}"),
+                DegradedError::ProviderConfiguration { provider, message },
+            )
+        }
+        _ => actor_error(format!("listen_client_build_failed: {message}")),
+    }
+}
 
 pub(super) async fn spawn_rx_task(
     args: ListenerArgs,
@@ -471,7 +492,8 @@ async fn spawn_rx_task_single_with_adapter<A: RealtimeSttAdapter>(
         .connect_policy(desktop_connect_policy())
         .extra_header(DEVICE_FINGERPRINT_HEADER, anlg_host::fingerprint())
         .build_single()
-        .await;
+        .await
+        .map_err(|error| client_build_error(&args, error))?;
 
     let outbound = tokio_stream::wrappers::ReceiverStream::new(rx);
 
@@ -531,7 +553,8 @@ async fn spawn_rx_task_dual_with_adapter<A: RealtimeSttAdapter>(
         .connect_policy(desktop_connect_policy())
         .extra_header(DEVICE_FINGERPRINT_HEADER, anlg_host::fingerprint())
         .build_dual()
-        .await;
+        .await
+        .map_err(|error| client_build_error(&args, error))?;
 
     let outbound = tokio_stream::wrappers::ReceiverStream::new(rx);
 

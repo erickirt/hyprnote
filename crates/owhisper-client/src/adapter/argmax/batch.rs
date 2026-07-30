@@ -197,7 +197,7 @@ impl ArgmaxAdapter {
             .api_key(api_key)
             .params(listen_params)
             .build_with_channels(channel_count)
-            .await;
+            .await?;
 
         let audio_stream =
             tokio_stream::iter(chunked_audio.chunks.into_iter().map(MixedMessage::Audio));

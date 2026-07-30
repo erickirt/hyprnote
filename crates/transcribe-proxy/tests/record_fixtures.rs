@@ -37,7 +37,8 @@ async fn record_live_fixture<A: RealtimeSttAdapter>(
             ..Default::default()
         })
         .build_single()
-        .await;
+        .await
+        .unwrap();
 
     let provider_name = format!("record:{}", provider);
     let input = test_audio_stream_with_rate(sample_rate);

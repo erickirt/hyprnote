@@ -24,7 +24,9 @@ macro_rules! define_realtime_e2e_tests {
                 .api_base($base)
                 .api_key(std::env::var($env_key).expect(concat!($env_key, " not set")))
                 .params(owhisper_interface::ListenParams::default())
-                .build_single();
+                .build_single()
+                .await
+                .unwrap();
 
             $crate::test_utils::run_single_test(client, $provider).await;
         }
@@ -37,7 +39,9 @@ macro_rules! define_realtime_e2e_tests {
                 .api_base($base)
                 .api_key(std::env::var($env_key).expect(concat!($env_key, " not set")))
                 .params(owhisper_interface::ListenParams::default())
-                .build_dual();
+                .build_dual()
+                .await
+                .unwrap();
 
             $crate::test_utils::run_dual_test(client, $provider).await;
         }
@@ -57,7 +61,9 @@ macro_rules! define_realtime_e2e_tests {
                 .api_base($base)
                 .api_key(std::env::var($env_key).expect(concat!($env_key, " not set")))
                 .params($params)
-                .build_single();
+                .build_single()
+                .await
+                .unwrap();
 
             $crate::test_utils::run_single_test(client, $provider).await;
         }
@@ -70,7 +76,9 @@ macro_rules! define_realtime_e2e_tests {
                 .api_base($base)
                 .api_key(std::env::var($env_key).expect(concat!($env_key, " not set")))
                 .params($params)
-                .build_dual();
+                .build_dual()
+                .await
+                .unwrap();
 
             $crate::test_utils::run_dual_test(client, $provider).await;
         }

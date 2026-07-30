@@ -25,7 +25,8 @@ mod tests {
                 ..Default::default()
             })
             .build_single()
-            .await;
+            .await
+            .unwrap();
 
         let (stream, _) = client.from_realtime_audio(input).await.unwrap();
         futures_util::pin_mut!(stream);

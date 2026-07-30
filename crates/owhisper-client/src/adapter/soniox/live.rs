@@ -390,7 +390,8 @@ mod tests {
                     .api_key(std::env::var("SONIOX_API_KEY").expect("SONIOX_API_KEY not set"))
                     .params($params)
                     .build_single()
-                    .await;
+                    .await
+                    .unwrap();
                 run_single_test(client, "soniox").await;
             }
         };
@@ -452,7 +453,8 @@ mod tests {
                 ..Default::default()
             })
             .build_dual()
-            .await;
+            .await
+            .unwrap();
 
         run_dual_test(client, "soniox").await;
     }

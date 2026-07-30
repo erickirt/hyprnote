@@ -194,7 +194,8 @@ mod tests {
                     .api_key("")
                     .params($params)
                     .build_single()
-                    .await;
+                    .await
+                    .unwrap();
                 run_single_test(client, "argmax").await;
             }
         };
@@ -232,7 +233,8 @@ mod tests {
                 ..Default::default()
             })
             .build_dual()
-            .await;
+            .await
+            .unwrap();
 
         run_dual_test(client, "argmax").await;
     }

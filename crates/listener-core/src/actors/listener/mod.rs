@@ -82,18 +82,34 @@ impl ListenerActor {
 }
 
 #[derive(Debug)]
-pub(super) struct ListenerInitError(pub(super) String);
+pub(super) struct ListenerInitError {
+    pub(super) message: String,
+    pub(super) degraded: Option<DegradedError>,
+}
 
 impl std::fmt::Display for ListenerInitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.message)
     }
 }
 
 impl std::error::Error for ListenerInitError {}
 
 pub(super) fn actor_error(msg: impl Into<String>) -> ActorProcessingErr {
-    Box::new(ListenerInitError(msg.into()))
+    Box::new(ListenerInitError {
+        message: msg.into(),
+        degraded: None,
+    })
+}
+
+pub(super) fn actor_error_with_degraded(
+    msg: impl Into<String>,
+    degraded: DegradedError,
+) -> ActorProcessingErr {
+    Box::new(ListenerInitError {
+        message: msg.into(),
+        degraded: Some(degraded),
+    })
 }
 
 #[ractor::async_trait]

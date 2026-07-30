@@ -63,7 +63,8 @@ async fn run_direct_live_single_e2e<A: RealtimeSttAdapter>(provider: Provider) {
             ..Default::default()
         })
         .build_single()
-        .await;
+        .await
+        .unwrap();
 
     let timeout = Duration::from_secs(timeout_secs());
     let input = test_audio_stream_single();
@@ -113,7 +114,8 @@ async fn run_direct_live_dual_e2e<A: RealtimeSttAdapter>(provider: Provider) {
             ..Default::default()
         })
         .build_dual()
-        .await;
+        .await
+        .unwrap();
 
     let timeout = Duration::from_secs(timeout_secs());
     let input = test_audio_stream_dual();

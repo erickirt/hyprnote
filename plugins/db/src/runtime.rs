@@ -510,6 +510,61 @@ impl QueryEventSink for QueryEventChannel {
     }
 }
 
+struct ExplicitRollbackTransaction {
+    transaction: Option<sqlx::Transaction<'static, sqlx::Sqlite>>,
+}
+
+impl ExplicitRollbackTransaction {
+    fn new(transaction: sqlx::Transaction<'static, sqlx::Sqlite>) -> Self {
+        Self {
+            transaction: Some(transaction),
+        }
+    }
+
+    fn connection(&mut self) -> &mut sqlx::SqliteConnection {
+        &mut *self
+            .transaction
+            .as_mut()
+            .expect("transaction should be present")
+    }
+
+    async fn commit(mut self) -> std::result::Result<(), sqlx::Error> {
+        self.transaction
+            .take()
+            .expect("transaction should be present")
+            .commit()
+            .await
+    }
+
+    async fn rollback(mut self) -> std::result::Result<(), sqlx::Error> {
+        self.transaction
+            .take()
+            .expect("transaction should be present")
+            .rollback()
+            .await
+    }
+}
+
+impl Drop for ExplicitRollbackTransaction {
+    fn drop(&mut self) {
+        let Some(transaction) = self.transaction.take() else {
+            return;
+        };
+
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            tracing::error!("sqlite_transaction_cancelled_without_async_runtime");
+            drop(transaction);
+            return;
+        };
+
+        runtime.spawn(async move {
+            if let Err(error) = transaction.rollback().await {
+                tracing::error!(%error, "sqlite_cancelled_transaction_rollback_failed");
+            }
+        });
+    }
+}
+
 pub struct PluginDbRuntime {
     db: std::sync::Arc<Db>,
     schema_ready: tokio::sync::OnceCell<()>,
@@ -523,6 +578,10 @@ pub struct PluginDbRuntime {
     cloudsync_activity_acquisition: tokio::sync::Mutex<()>,
     cloudsync_auth_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     cloudsync_auth_changed: std::sync::Arc<tokio::sync::Notify>,
+    #[cfg(test)]
+    pause_transaction_after_begin: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    transaction_started: tokio::sync::Notify,
 }
 
 struct CloudsyncFullResyncTask {
@@ -673,6 +732,10 @@ impl PluginDbRuntime {
             cloudsync_activity_acquisition: Default::default(),
             cloudsync_auth_generation: Default::default(),
             cloudsync_auth_changed: Default::default(),
+            #[cfg(test)]
+            pause_transaction_after_begin: Default::default(),
+            #[cfg(test)]
+            transaction_started: Default::default(),
         }
     }
 
@@ -689,6 +752,17 @@ impl PluginDbRuntime {
 
     pub fn pool(&self) -> &sqlx::SqlitePool {
         self.db.pool()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pause_next_transaction_after_begin(&self) {
+        self.pause_transaction_after_begin
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn wait_for_transaction_after_begin(&self) {
+        self.transaction_started.notified().await;
     }
 
     pub fn workspace_key(&self, workspace_id: &str) -> Option<anlg_e2ee::WorkspaceKey> {
@@ -882,25 +956,53 @@ impl PluginDbRuntime {
     ) -> Result<Vec<u64>> {
         let _write_guard = self.synced_write_barrier.read().await;
         self.ensure_app_schema().await?;
-        let mut transaction = self.db.pool().begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction =
+            ExplicitRollbackTransaction::new(self.db.pool().begin_with("BEGIN IMMEDIATE").await?);
+        #[cfg(test)]
+        if self
+            .pause_transaction_after_begin
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+        {
+            self.transaction_started.notify_one();
+            std::future::pending::<()>().await;
+        }
         let mut rows_affected = Vec::with_capacity(statements.len());
 
         for (statement_index, statement) in statements.into_iter().enumerate() {
-            let result = bind_params(
+            let result = match bind_params(
                 sqlx::query(sqlx::AssertSqlSafe(statement.sql.as_str())),
                 &statement.params,
             )
-            .execute(&mut *transaction)
-            .await?;
+            .execute(transaction.connection())
+            .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    if let Err(rollback_error) = transaction.rollback().await {
+                        tracing::error!(
+                            %rollback_error,
+                            "sqlite_failed_transaction_rollback_failed"
+                        );
+                    }
+                    return Err(error.into());
+                }
+            };
             let actual = result.rows_affected();
             if let Some(expected) = statement.expected_rows_affected
                 && actual != expected
             {
-                return Err(crate::Error::UnexpectedRowsAffected {
+                let error = crate::Error::UnexpectedRowsAffected {
                     statement_index,
                     expected,
                     actual,
-                });
+                };
+                if let Err(rollback_error) = transaction.rollback().await {
+                    tracing::error!(
+                        %rollback_error,
+                        "sqlite_mismatched_transaction_rollback_failed"
+                    );
+                }
+                return Err(error);
             }
             rows_affected.push(actual);
         }

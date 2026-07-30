@@ -8,6 +8,8 @@ pub enum Error {
         retryable: bool,
         status: Option<reqwest::StatusCode>,
     },
+    #[error("invalid realtime endpoint configuration for {provider}: {message}")]
+    ProviderConfiguration { provider: String, message: String },
     #[error(transparent)]
     Http(#[from] reqwest::Error),
     #[error(transparent)]
@@ -24,6 +26,13 @@ pub enum Error {
 }
 
 impl Error {
+    pub fn provider_configuration(provider: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::ProviderConfiguration {
+            provider: provider.into(),
+            message: message.into(),
+        }
+    }
+
     pub fn provider_failure(message: impl Into<String>, retryable: bool) -> Self {
         Self::ProviderFailure {
             message: message.into(),

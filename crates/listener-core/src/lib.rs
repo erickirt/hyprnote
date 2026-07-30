@@ -65,6 +65,8 @@ pub enum DegradedError {
     UpstreamUnavailable { message: String },
     #[serde(rename = "connection_timeout")]
     ConnectionTimeout,
+    #[serde(rename = "provider_configuration")]
+    ProviderConfiguration { provider: String, message: String },
     #[serde(rename = "stream_error")]
     StreamError { message: String },
 }

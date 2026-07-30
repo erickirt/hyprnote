@@ -383,7 +383,8 @@ mod tests {
                 ..Default::default()
             })
             .build_single()
-            .await;
+            .await
+            .unwrap();
 
         run_single_test_with_rate(client, "mistral", MISTRAL_SAMPLE_RATE).await;
     }
@@ -401,7 +402,8 @@ mod tests {
                 ..Default::default()
             })
             .build_dual()
-            .await;
+            .await
+            .unwrap();
 
         run_dual_test_with_rate(client, "mistral", MISTRAL_SAMPLE_RATE).await;
     }

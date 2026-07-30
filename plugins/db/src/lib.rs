@@ -285,6 +285,7 @@ mod test {
 
     use anlg_db_reactive::QueryEventSink;
     use serde_json::json;
+    use sqlx::Connection;
     use tauri::ipc::{Channel, InvokeResponseBody};
     use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate, matchers::path};
 
@@ -495,7 +496,9 @@ mod test {
         }
     }
 
-    async fn setup_unmigrated_runtime() -> (tempfile::TempDir, Arc<runtime::PluginDbRuntime>) {
+    async fn setup_unmigrated_runtime_with_max_connections(
+        max_connections: u32,
+    ) -> (tempfile::TempDir, Arc<runtime::PluginDbRuntime>) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("app.db");
         let db = anlg_db_core::Db::open(anlg_db_core::DbOpenOptions {
@@ -503,12 +506,16 @@ mod test {
             cloudsync_enabled: false,
             journal_mode_wal: true,
             foreign_keys: true,
-            max_connections: Some(4),
+            max_connections: Some(max_connections),
         })
         .await
         .unwrap();
 
         (dir, Arc::new(runtime::PluginDbRuntime::new(Arc::new(db))))
+    }
+
+    async fn setup_unmigrated_runtime() -> (tempfile::TempDir, Arc<runtime::PluginDbRuntime>) {
+        setup_unmigrated_runtime_with_max_connections(4).await
     }
 
     #[tokio::test]
@@ -783,6 +790,64 @@ mod test {
             .await
             .unwrap();
         assert!(rows.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancelled_transaction_returns_a_clean_connection_to_the_pool() {
+        let (_dir, runtime) = setup_unmigrated_runtime_with_max_connections(1).await;
+        sqlx::query("CREATE TEMP TABLE pooled_connection_marker (id INTEGER PRIMARY KEY)")
+            .execute(runtime.pool())
+            .await
+            .unwrap();
+
+        runtime.pause_next_transaction_after_begin();
+        let transaction_runtime = Arc::clone(&runtime);
+        let transaction_task = tokio::spawn(async move {
+            transaction_runtime
+                .execute_transaction(vec![TransactionStatement {
+                    sql: "INSERT INTO templates (id, title) VALUES (?, ?)".to_string(),
+                    params: vec![json!("cancelled"), json!("Cancelled")],
+                    expected_rows_affected: Some(1),
+                }])
+                .await
+        });
+
+        runtime.wait_for_transaction_after_begin().await;
+        transaction_task.abort();
+        assert!(transaction_task.await.unwrap_err().is_cancelled());
+
+        let mut connection = tokio::time::timeout(Duration::from_secs(2), runtime.pool().acquire())
+            .await
+            .expect("timed out reacquiring the pooled connection")
+            .unwrap();
+        assert!(!connection.is_in_transaction());
+        let marker_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pooled_connection_marker")
+            .fetch_one(&mut *connection)
+            .await
+            .expect("the original pooled connection should be reused");
+        assert_eq!(marker_count, 0);
+
+        let mut transaction = connection
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .expect("a new immediate transaction should start");
+        sqlx::query("INSERT INTO templates (id, title) VALUES (?, ?)")
+            .bind("after-cancellation")
+            .bind("After cancellation")
+            .execute(&mut *transaction)
+            .await
+            .expect("a local write should succeed after cancellation");
+        transaction.commit().await.unwrap();
+        drop(connection);
+
+        let rows = runtime
+            .execute(
+                "SELECT id FROM templates WHERE id = ?".to_string(),
+                vec![json!("after-cancellation")],
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows, vec![json!({ "id": "after-cancellation" })]);
     }
 
     #[tokio::test]

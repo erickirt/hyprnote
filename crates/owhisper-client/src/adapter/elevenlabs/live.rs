@@ -323,7 +323,8 @@ mod tests {
                     )
                     .params($params)
                     .build_single()
-                    .await;
+                    .await
+                    .unwrap();
                 run_single_test(client, "elevenlabs").await;
             }
         };
@@ -375,7 +376,8 @@ mod tests {
                 ..Default::default()
             })
             .build_dual()
-            .await;
+            .await
+            .unwrap();
 
         run_dual_test(client, "elevenlabs").await;
     }

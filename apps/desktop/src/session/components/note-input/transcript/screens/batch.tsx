@@ -52,7 +52,11 @@ export function BatchState({
 }
 
 function isRetryable(error: DegradedError | null) {
-  return error !== null && error.type !== "authentication_failed";
+  return (
+    error !== null &&
+    error.type !== "authentication_failed" &&
+    error.type !== "provider_configuration"
+  );
 }
 
 function degradedMessage(error: DegradedError): string {
@@ -63,6 +67,8 @@ function degradedMessage(error: DegradedError): string {
       return error.message;
     case "connection_timeout":
       return "Transcription connection timed out";
+    case "provider_configuration":
+      return `Transcription provider is misconfigured (${error.provider})`;
     case "stream_error":
       return "Transcription stream error";
   }

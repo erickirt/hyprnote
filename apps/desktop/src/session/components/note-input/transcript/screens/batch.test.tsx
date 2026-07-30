@@ -51,4 +51,21 @@ describe("BatchState", () => {
     expect(screen.queryByText(/while we reconnect/)).toBeNull();
     expect(screen.getByText(/complete transcript/)).not.toBeNull();
   });
+
+  it("does not retry a malformed provider endpoint", () => {
+    render(
+      <BatchState
+        requestedLiveTranscription
+        error={{
+          type: "provider_configuration",
+          provider: "Deepgram",
+          message: "invalid endpoint",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Live transcription stopped")).not.toBeNull();
+    expect(screen.queryByText(/while we reconnect/)).toBeNull();
+    expect(screen.getByText(/provider is misconfigured/)).not.toBeNull();
+  });
 });

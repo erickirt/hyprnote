@@ -377,6 +377,7 @@ async fn anarlog_listen_client(
         })
         .build_single()
         .await
+        .unwrap()
 }
 
 fn test_client_outbound() -> impl futures_util::Stream<Item = MixedMessage<Bytes, ControlMessage>> {

@@ -345,6 +345,11 @@ fn map_provider_error(error: owhisper_client::Error) -> BatchAttemptError {
                 BatchAttemptError::Client(message)
             }
         }
+        owhisper_client::Error::ProviderConfiguration { provider, message } => {
+            BatchAttemptError::Client(format!(
+                "invalid realtime endpoint configuration for {provider}: {message}"
+            ))
+        }
         owhisper_client::Error::AudioProcessing(msg) => classify_audio_processing_message(msg),
         owhisper_client::Error::WebSocket(msg) => BatchAttemptError::Retryable(msg),
     }
@@ -462,5 +467,14 @@ mod tests {
             status: Some(reqwest::StatusCode::UNAUTHORIZED),
         });
         assert!(matches!(err, BatchAttemptError::Auth(_)));
+    }
+
+    #[test]
+    fn test_provider_configuration_maps_to_non_retryable_client_error() {
+        let err = map_provider_error(owhisper_client::Error::ProviderConfiguration {
+            provider: "test".to_string(),
+            message: "invalid endpoint".to_string(),
+        });
+        assert!(matches!(err, BatchAttemptError::Client(_)));
     }
 }

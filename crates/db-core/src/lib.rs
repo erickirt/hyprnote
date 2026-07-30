@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use sqlx::pool::PoolConnection;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::{Sqlite, SqlitePool};
+use sqlx::{Connection, Sqlite, SqlitePool};
 
 pub use crate::cloudsync::{
     CLOUDSYNC_MAX_OUTBOUND_BYTES, CLOUDSYNC_MAX_OUTBOUND_CHUNKS, CLOUDSYNC_MAX_OUTBOUND_ROWS,
@@ -134,7 +134,7 @@ impl Db {
             anlg_cloudsync::apply_with_initializer(options, &cloudsync_initializer)?;
         let (change_notifier, pool_options) =
             anlg_db_change::ChangeNotifier::new_with_cloudsync(cloudsync_initializer.clone());
-        let pool = pool_options
+        let pool = apply_internal_pool_policy(pool_options)
             .connect_with(options)
             .await
             .map_err(anlg_cloudsync::Error::from)?;
@@ -161,7 +161,7 @@ impl Db {
             apply_internal_connect_policy(SqliteConnectOptions::from_str("sqlite::memory:")?);
         let (options, cloudsync_path) = anlg_cloudsync::apply(options)?;
         let (change_notifier, pool_options) = anlg_db_change::ChangeNotifier::disabled();
-        let pool = pool_options
+        let pool = apply_internal_pool_policy(pool_options)
             .max_connections(1)
             .connect_with(options)
             .await
@@ -192,7 +192,9 @@ impl Db {
             .create_if_missing(true)
             .pragma("foreign_keys", "ON");
         let (change_notifier, pool_options) = anlg_db_change::ChangeNotifier::new();
-        let pool = pool_options.connect_with(options).await?;
+        let pool = apply_internal_pool_policy(pool_options)
+            .connect_with(options)
+            .await?;
 
         Ok(Self {
             cloudsync_enabled: false,
@@ -217,7 +219,9 @@ impl Db {
             .pragma("foreign_keys", "ON")
             .pragma("query_only", "ON");
         let (change_notifier, pool_options) = anlg_db_change::ChangeNotifier::new();
-        let pool = pool_options.connect_with(options).await?;
+        let pool = apply_internal_pool_policy(pool_options)
+            .connect_with(options)
+            .await?;
 
         Ok(Self {
             cloudsync_enabled: false,
@@ -240,7 +244,7 @@ impl Db {
             apply_internal_connect_policy(SqliteConnectOptions::from_str("sqlite::memory:")?)
                 .pragma("foreign_keys", "ON");
         let (change_notifier, pool_options) = anlg_db_change::ChangeNotifier::new();
-        let pool = pool_options
+        let pool = apply_internal_pool_policy(pool_options)
             .max_connections(1)
             .connect_with(options)
             .await?;
@@ -310,7 +314,7 @@ async fn connect_with_options(
         (false, _) => (connect_options, None),
     };
 
-    let mut pool_options = pool_options;
+    let mut pool_options = apply_internal_pool_policy(pool_options);
     match options.storage {
         DbStorage::Memory => {
             pool_options = pool_options.max_connections(1);
@@ -344,6 +348,30 @@ async fn connect_with_options(
 
 fn apply_internal_connect_policy(connect_options: SqliteConnectOptions) -> SqliteConnectOptions {
     connect_options.busy_timeout(SQLITE_BUSY_TIMEOUT)
+}
+
+fn apply_internal_pool_policy(pool_options: SqlitePoolOptions) -> SqlitePoolOptions {
+    pool_options.after_release(|connection, _| {
+        Box::pin(async move {
+            if !connection.is_in_transaction() {
+                return Ok(true);
+            }
+
+            tracing::warn!("sqlite_connection_returned_in_transaction");
+            if let Err(error) = connection.ping().await {
+                tracing::error!(%error, "sqlite_transaction_repair_failed");
+                return Ok(false);
+            }
+
+            if connection.is_in_transaction() {
+                tracing::error!("sqlite_connection_rejected_in_transaction");
+                return Ok(false);
+            }
+
+            tracing::info!("sqlite_transaction_repaired_before_pool_return");
+            Ok(true)
+        })
+    })
 }
 
 async fn ensure_cloudsync_wal(pool: &SqlitePool) -> Result<(), anlg_cloudsync::Error> {

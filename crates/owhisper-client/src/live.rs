@@ -91,14 +91,19 @@ impl<A: RealtimeSttAdapter> ListenClientBuilder<A> {
         adapter: &A,
         params: &ListenParams,
         channels: u8,
-    ) -> anlg_ws_client::client::ClientRequestBuilder {
+    ) -> Result<anlg_ws_client::client::ClientRequestBuilder, crate::Error> {
         let original_api_base = self.get_api_base();
         let api_base = append_provider_param(original_api_base, adapter.provider_name());
         let url = adapter
             .build_ws_url_with_api_key(&api_base, params, channels, self.api_key.as_deref())
             .await
             .unwrap_or_else(|| adapter.build_ws_url(&api_base, params, channels));
-        let uri = url.to_string().parse().unwrap();
+        let uri = url.to_string().parse().map_err(|error| {
+            crate::Error::provider_configuration(
+                adapter.provider_name(),
+                format!("realtime endpoint cannot be used as a WebSocket URI: {error}"),
+            )
+        })?;
 
         let mut request = anlg_ws_client::client::ClientRequestBuilder::new(uri);
 
@@ -115,28 +120,28 @@ impl<A: RealtimeSttAdapter> ListenClientBuilder<A> {
             request = request.with_header(header_name, header_value);
         }
 
-        request
+        Ok(request)
     }
 
-    pub async fn build_with_channels(self, channels: u8) -> ListenClient<A> {
+    pub async fn build_with_channels(self, channels: u8) -> Result<ListenClient<A>, crate::Error> {
         let adapter = A::default();
         let params = self.normalized_params();
-        let request = self.build_request(&adapter, &params, channels).await;
+        let request = self.build_request(&adapter, &params, channels).await?;
         let initial_message = adapter.initial_message(self.api_key.as_deref(), &params, channels);
 
-        ListenClient {
+        Ok(ListenClient {
             adapter,
             request,
             initial_message,
             connect_policy: self.connect_policy,
-        }
+        })
     }
 
-    pub async fn build_single(self) -> ListenClient<A> {
+    pub async fn build_single(self) -> Result<ListenClient<A>, crate::Error> {
         self.build_with_channels(1).await
     }
 
-    pub async fn build_dual(self) -> ListenClientDual<A> {
+    pub async fn build_dual(self) -> Result<ListenClientDual<A>, crate::Error> {
         let adapter = A::default();
         let channels = if adapter.supports_native_multichannel() {
             2
@@ -144,15 +149,15 @@ impl<A: RealtimeSttAdapter> ListenClientBuilder<A> {
             1
         };
         let params = self.normalized_params();
-        let request = self.build_request(&adapter, &params, channels).await;
+        let request = self.build_request(&adapter, &params, channels).await?;
         let initial_message = adapter.initial_message(self.api_key.as_deref(), &params, channels);
 
-        ListenClientDual {
+        Ok(ListenClientDual {
             adapter,
             request,
             initial_message,
             connect_policy: self.connect_policy,
-        }
+        })
     }
 }
 
@@ -630,11 +635,11 @@ mod tests {
 
         fn build_ws_url(
             &self,
-            _api_base: &str,
+            api_base: &str,
             _params: &owhisper_interface::ListenParams,
             _channels: u8,
         ) -> url::Url {
-            "ws://localhost".parse().expect("invalid test url")
+            api_base.parse().expect("invalid test url")
         }
 
         fn build_auth_header(&self, _api_key: Option<&str>) -> Option<(&'static str, String)> {
@@ -656,6 +661,55 @@ mod tests {
 
     fn proxy_base() -> String {
         std::env::var("PROXY_URL").unwrap_or_else(|_| "localhost:3001".to_string())
+    }
+
+    #[tokio::test]
+    async fn malformed_custom_endpoint_returns_provider_configuration_error() {
+        let api_base = format!("{}://custom.example/listen", "a".repeat(65));
+        let error = ListenClient::builder()
+            .adapter::<TestAdapter>()
+            .api_base(api_base)
+            .build_single()
+            .await
+            .err()
+            .expect("an oversized URI scheme should be rejected");
+
+        assert!(matches!(
+            error,
+            crate::Error::ProviderConfiguration { provider, .. } if provider == "test"
+        ));
+    }
+
+    #[tokio::test]
+    async fn malformed_direct_endpoint_returns_provider_configuration_error() {
+        let api_base = format!("https://api.deepgram.com/{}", "a".repeat(70 * 1024));
+        let error = ListenClient::builder()
+            .adapter::<DeepgramAdapter>()
+            .api_base(api_base)
+            .build_single()
+            .await
+            .err()
+            .expect("an oversized direct endpoint should be rejected");
+
+        assert!(matches!(
+            error,
+            crate::Error::ProviderConfiguration { provider, .. } if provider == "deepgram"
+        ));
+    }
+
+    #[tokio::test]
+    async fn valid_proxy_and_direct_endpoints_still_build() {
+        for api_base in [
+            "https://api.deepgram.com/v1",
+            "https://api.anarlog.so/stt?provider=deepgram",
+        ] {
+            ListenClient::builder()
+                .adapter::<DeepgramAdapter>()
+                .api_base(api_base)
+                .build_single()
+                .await
+                .unwrap();
+        }
     }
 
     #[tokio::test]
@@ -725,7 +779,8 @@ mod tests {
                 ..Default::default()
             })
             .build_single()
-            .await;
+            .await
+            .unwrap();
 
         let msg = client.initial_message.expect("missing initial message");
         let Message::Text(text) = msg else {
@@ -751,7 +806,8 @@ mod tests {
                 ..Default::default()
             })
             .build_single()
-            .await;
+            .await
+            .unwrap();
 
         run_single_test(client, "proxy-deepgram").await;
     }
@@ -768,7 +824,8 @@ mod tests {
                 ..Default::default()
             })
             .build_dual()
-            .await;
+            .await
+            .unwrap();
 
         run_dual_test(client, "proxy-deepgram").await;
     }
@@ -785,7 +842,8 @@ mod tests {
                 ..Default::default()
             })
             .build_single()
-            .await;
+            .await
+            .unwrap();
 
         run_single_test(client, "proxy-soniox").await;
     }
@@ -802,7 +860,8 @@ mod tests {
                 ..Default::default()
             })
             .build_dual()
-            .await;
+            .await
+            .unwrap();
 
         run_dual_test(client, "proxy-soniox").await;
     }
@@ -819,7 +878,8 @@ mod tests {
                 ..Default::default()
             })
             .build_single()
-            .await;
+            .await
+            .unwrap();
 
         run_single_test(client, "proxy-assemblyai").await;
     }
@@ -836,7 +896,8 @@ mod tests {
                 ..Default::default()
             })
             .build_dual()
-            .await;
+            .await
+            .unwrap();
 
         run_dual_test(client, "proxy-assemblyai").await;
     }

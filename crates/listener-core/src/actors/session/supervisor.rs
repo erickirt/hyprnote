@@ -9,7 +9,7 @@ use crate::DegradedError;
 use crate::actors::session::types::{
     SessionConfigUpdate, SessionContext, SessionParams, session_span, session_supervisor_name,
 };
-use crate::actors::{ListenerConfigUpdate, ListenerMsg};
+use crate::actors::{ListenerConfigUpdate, ListenerInitError, ListenerMsg};
 use owhisper_client::AdapterKind;
 
 use self::children::{ChildKind, RESTART_BUDGET};
@@ -115,16 +115,7 @@ impl Actor for SessionActor {
                 }
                 Err(error) => {
                     tracing::warn!(?error, "listener_spawn_failed");
-                    let degraded = if should_stop_on_listener_failure(state) {
-                        DegradedError::StreamError {
-                            message: error.to_string(),
-                        }
-                    } else {
-                        DegradedError::UpstreamUnavailable {
-                            message: mode::classify_connection_failure(&state.ctx.params.base_url),
-                        }
-                    };
-
+                    let degraded = classify_listener_spawn_failure(state, &error);
                     handle_listener_failure(&myself, state, degraded).await;
                 }
             }
@@ -332,15 +323,7 @@ async fn refresh_listener(myself: ActorRef<SessionMsg>, state: &mut SessionState
         }
         Err(error) => {
             tracing::warn!(?error, "listener_refresh_failed");
-            let degraded = if should_stop_on_listener_failure(state) {
-                DegradedError::StreamError {
-                    message: error.to_string(),
-                }
-            } else {
-                DegradedError::UpstreamUnavailable {
-                    message: mode::classify_connection_failure(&state.ctx.params.base_url),
-                }
-            };
+            let degraded = classify_listener_spawn_failure(state, &error);
             handle_listener_failure(&myself, state, degraded).await;
         }
     }
@@ -382,7 +365,32 @@ async fn handle_listener_failure(
 }
 
 fn should_retry_listener_failure(degraded: &DegradedError) -> bool {
-    !matches!(degraded, DegradedError::AuthenticationFailed { .. })
+    !matches!(
+        degraded,
+        DegradedError::AuthenticationFailed { .. } | DegradedError::ProviderConfiguration { .. }
+    )
+}
+
+fn classify_listener_spawn_failure(
+    state: &SessionState,
+    error: &ractor::SpawnErr,
+) -> DegradedError {
+    if let ractor::SpawnErr::StartupFailed(error) = error
+        && let Some(listener_error) = error.downcast_ref::<ListenerInitError>()
+        && let Some(degraded) = &listener_error.degraded
+    {
+        return degraded.clone();
+    }
+
+    if should_stop_on_listener_failure(state) {
+        DegradedError::StreamError {
+            message: error.to_string(),
+        }
+    } else {
+        DegradedError::UpstreamUnavailable {
+            message: mode::classify_connection_failure(&state.ctx.params.base_url),
+        }
+    }
 }
 
 fn schedule_listener_retry(myself: &ActorRef<SessionMsg>, state: &mut SessionState) {
@@ -423,14 +431,8 @@ async fn retry_listener(myself: ActorRef<SessionMsg>, state: &mut SessionState) 
         }
         Err(error) => {
             tracing::warn!(?error, "listener_retry_failed");
-            handle_listener_failure(
-                &myself,
-                state,
-                DegradedError::UpstreamUnavailable {
-                    message: mode::classify_connection_failure(&state.ctx.params.base_url),
-                },
-            )
-            .await;
+            let degraded = classify_listener_spawn_failure(state, &error);
+            handle_listener_failure(&myself, state, degraded).await;
         }
     }
 }
@@ -766,6 +768,24 @@ mod tests {
             &DegradedError::AuthenticationFailed {
                 provider: "test".to_string(),
             }
+        ));
+    }
+
+    #[test]
+    fn provider_configuration_failures_do_not_retry() {
+        let degraded = DegradedError::ProviderConfiguration {
+            provider: "test".to_string(),
+            message: "invalid endpoint".to_string(),
+        };
+        assert!(!should_retry_listener_failure(&degraded));
+
+        let error = ractor::SpawnErr::StartupFailed(Box::new(ListenerInitError {
+            message: "listener failed".to_string(),
+            degraded: Some(degraded),
+        }));
+        assert!(matches!(
+            classify_listener_spawn_failure(&test_state(test_ctx()), &error),
+            DegradedError::ProviderConfiguration { .. }
         ));
     }
 
