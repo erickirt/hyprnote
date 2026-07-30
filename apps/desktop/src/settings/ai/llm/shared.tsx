@@ -117,6 +117,154 @@ const _PROVIDERS = [
     requirements: [{ kind: "requires_config", fields: ["api_key"] }],
   },
   {
+    id: "cohere",
+    displayName: "Cohere",
+    badge: null,
+    icon: <Icon icon="simple-icons:cohere" width={16} />,
+    baseUrl: "https://api.cohere.ai/compatibility/v1",
+    requirements: [{ kind: "requires_config", fields: ["api_key"] }],
+    links: {
+      models: {
+        label: "Available models",
+        url: "https://docs.cohere.com/docs/models",
+      },
+      setup: {
+        label: "OpenAI compatibility",
+        url: "https://docs.cohere.com/docs/compatibility-api",
+      },
+    },
+  },
+  {
+    id: "groq",
+    displayName: "Groq",
+    badge: null,
+    icon: <Icon icon="simple-icons:groq" width={16} />,
+    baseUrl: "https://api.groq.com/openai/v1",
+    requirements: [{ kind: "requires_config", fields: ["api_key"] }],
+    links: {
+      models: {
+        label: "Available models",
+        url: "https://console.groq.com/docs/models",
+      },
+      setup: {
+        label: "API keys",
+        url: "https://console.groq.com/keys",
+      },
+    },
+  },
+  {
+    id: "xai",
+    displayName: "xAI",
+    badge: null,
+    icon: <Icon icon="simple-icons:x" width={16} />,
+    baseUrl: "https://api.x.ai/v1",
+    requirements: [{ kind: "requires_config", fields: ["api_key"] }],
+    links: {
+      models: {
+        label: "Available models",
+        url: "https://docs.x.ai/developers/models",
+      },
+      setup: {
+        label: "API keys",
+        url: "https://console.x.ai/",
+      },
+    },
+  },
+  {
+    id: "together",
+    displayName: "Together AI",
+    badge: null,
+    icon: <Icon icon="simple-icons:together" width={16} />,
+    baseUrl: "https://api.together.xyz/v1",
+    requirements: [{ kind: "requires_config", fields: ["api_key"] }],
+    links: {
+      models: {
+        label: "Available models",
+        url: "https://docs.together.ai/docs/serverless-models",
+      },
+      setup: {
+        label: "API keys",
+        url: "https://api.together.ai/settings/api-keys",
+      },
+    },
+  },
+  {
+    id: "fireworks",
+    displayName: "Fireworks AI",
+    badge: null,
+    icon: <Icon icon="simple-icons:fireworks" width={16} />,
+    baseUrl: "https://api.fireworks.ai/inference/v1",
+    requirements: [{ kind: "requires_config", fields: ["api_key"] }],
+    links: {
+      models: {
+        label: "Available models",
+        url: "https://fireworks.ai/models",
+      },
+      setup: {
+        label: "API keys",
+        url: "https://fireworks.ai/account/api-keys",
+      },
+    },
+  },
+  {
+    id: "cerebras",
+    displayName: "Cerebras",
+    badge: null,
+    icon: <Icon icon="simple-icons:cerebras" width={16} />,
+    baseUrl: "https://api.cerebras.ai/v1",
+    requirements: [{ kind: "requires_config", fields: ["api_key"] }],
+    links: {
+      models: {
+        label: "Available models",
+        url: "https://inference-docs.cerebras.ai/models/overview",
+      },
+      setup: {
+        label: "API keys",
+        url: "https://cloud.cerebras.ai/",
+      },
+    },
+  },
+  {
+    id: "amazon_bedrock",
+    displayName: "Amazon Bedrock",
+    badge: "Beta",
+    icon: <Icon icon="simple-icons:amazonwebservices" width={16} />,
+    baseUrl: undefined,
+    requirements: [
+      { kind: "requires_config", fields: ["base_url", "api_key"] },
+    ],
+    links: {
+      models: {
+        label: "Supported models",
+        url: "https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html",
+      },
+      setup: {
+        label: "OpenAI-compatible APIs",
+        url: "https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html",
+      },
+    },
+  },
+  {
+    id: "google_vertex_ai",
+    displayName: "Google Vertex AI",
+    badge: "Beta",
+    icon: <Icon icon="simple-icons:googlecloud" width={16} />,
+    baseUrl: undefined,
+    requirements: [
+      { kind: "requires_config", fields: ["base_url", "api_key"] },
+    ],
+    links: {
+      models: {
+        label: "Available models",
+        url: "https://cloud.google.com/vertex-ai/generative-ai/docs/learn/models",
+      },
+      setup: {
+        label: "OpenAI compatibility",
+        url: "https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library",
+      },
+    },
+  },
+  {
     id: "cloudflare_workers_ai",
     displayName: "Cloudflare Workers AI",
     badge: null,

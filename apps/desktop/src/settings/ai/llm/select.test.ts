@@ -36,6 +36,74 @@ describe("getLlmProviderStatus", () => {
     expect(status.listModels).toBeTypeOf("function");
   });
 
+  test.each([
+    ["cohere", "https://api.cohere.ai/compatibility/v1"],
+    ["groq", "https://api.groq.com/openai/v1"],
+    ["xai", "https://api.x.ai/v1"],
+    ["together", "https://api.together.xyz/v1"],
+    ["fireworks", "https://api.fireworks.ai/inference/v1"],
+    ["cerebras", "https://api.cerebras.ai/v1"],
+  ])("configures %s through its OpenAI-compatible endpoint", (id, baseUrl) => {
+    const definition = provider(id);
+    const status = getLlmProviderStatus({
+      provider: definition,
+      config: { api_key: "test-key" },
+      isAuthenticated: false,
+      isPaid: false,
+    });
+
+    expect(definition.baseUrl).toBe(baseUrl);
+    expect(status.configured).toBe(true);
+    expect(status.listModels).toBeTypeOf("function");
+  });
+
+  test.each(["amazon_bedrock", "google_vertex_ai"])(
+    "requires both an endpoint and credentials for %s",
+    (id) => {
+      const definition = provider(id);
+      const missingEndpoint = getLlmProviderStatus({
+        provider: definition,
+        config: { api_key: "test-key" },
+        isAuthenticated: false,
+        isPaid: false,
+      });
+      const configured = getLlmProviderStatus({
+        provider: definition,
+        config: {
+          base_url: "https://provider.example.com/v1",
+          api_key: "test-key",
+        },
+        isAuthenticated: false,
+        isPaid: false,
+      });
+
+      expect(missingEndpoint.configured).toBe(false);
+      expect(configured.configured).toBe(true);
+      expect(configured.listModels).toBeTypeOf("function");
+    },
+  );
+
+  test("uses curated models for Google Vertex AI", async () => {
+    const status = getLlmProviderStatus({
+      provider: provider("google_vertex_ai"),
+      config: {
+        base_url:
+          "https://aiplatform.googleapis.com/v1/projects/project/locations/global/endpoints/openapi",
+        api_key: "test-key",
+      },
+      isAuthenticated: false,
+      isPaid: false,
+    });
+
+    const result = await status.listModels?.();
+
+    expect(result?.models.slice(0, 3)).toEqual([
+      "google/gemini-3.6-flash",
+      "google/gemini-3.5-flash-lite",
+      "google/gemini-3.1-pro-preview",
+    ]);
+  });
+
   test("keeps local providers active without API keys", () => {
     const status = getLlmProviderStatus({
       provider: provider("ollama"),

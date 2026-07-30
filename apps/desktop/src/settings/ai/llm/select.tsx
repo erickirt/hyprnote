@@ -438,6 +438,15 @@ type ProviderConfig = {
   api_key?: unknown;
 };
 
+const GOOGLE_VERTEX_AI_MODELS = [
+  "google/gemini-3.6-flash",
+  "google/gemini-3.5-flash-lite",
+  "google/gemini-3.1-pro-preview",
+  "google/gemini-3.5-flash",
+  "google/gemini-3-flash-preview",
+  "google/gemini-3.1-flash-lite",
+] as const;
+
 export function getLlmProviderStatus({
   provider,
   config,
@@ -504,6 +513,18 @@ export function getLlmProviderStatus({
       break;
     case "google_generative_ai":
       listModelsFunc = () => listGoogleModels(baseUrl, apiKey);
+      break;
+    case "google_vertex_ai":
+      listModelsFunc = async () => ({
+        models: [...GOOGLE_VERTEX_AI_MODELS],
+        ignored: [],
+        metadata: Object.fromEntries(
+          GOOGLE_VERTEX_AI_MODELS.map((model) => [
+            model,
+            { input_modalities: ["text", "image"] as InputModality[] },
+          ]),
+        ),
+      });
       break;
     case "mistral":
       listModelsFunc = () => listMistralModels(baseUrl, apiKey);

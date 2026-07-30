@@ -59,9 +59,13 @@ function ProviderContext({ providerId }: { providerId: ProviderId }) {
                   ? "Enter your **Azure AI Foundry endpoint** as the Base URL and your **API key**. Supports Claude and other models deployed via Azure AI Foundry. [Report issues](https://github.com/fastrepl/char/issues/3928)"
                   : providerId === "google_generative_ai"
                     ? "Visit [AI Studio](https://aistudio.google.com/api-keys) to create an API key."
-                    : providerId === "cloudflare_workers_ai"
-                      ? "Enter the Workers AI **OpenAI-compatible base URL** as `https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1` and use a Cloudflare API token with Workers AI access."
-                      : "";
+                    : providerId === "amazon_bedrock"
+                      ? "Enter the regional **Bedrock Mantle OpenAI-compatible URL** (for example, `https://bedrock-mantle.us-east-1.api.aws/v1`) and a Bedrock long-term API key."
+                      : providerId === "google_vertex_ai"
+                        ? "Enter your project and location's **Vertex AI OpenAI-compatible endpoint** and a bearer access token. Vertex access tokens expire, so replace the saved token when Google Cloud refreshes it."
+                        : providerId === "cloudflare_workers_ai"
+                          ? "Enter the Workers AI **OpenAI-compatible base URL** as `https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1` and use a Cloudflare API token with Workers AI access."
+                          : "";
 
   if (!content) {
     return null;
