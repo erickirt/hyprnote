@@ -23,4 +23,18 @@ describe("processGenericModels", () => {
       { id: "model-05-2026", reasons: ["date_snapshot"] },
     ]);
   });
+
+  test("filters dotted Bedrock model IDs by their model name", () => {
+    const result = processGenericModels([
+      { id: "anthropic.claude-opus-4.7" },
+      { id: "google.gemma-3-27b-it" },
+      { id: "anthropic.claude-opus-5" },
+    ]);
+
+    expect(result.models).toEqual(["anthropic.claude-opus-5"]);
+    expect(result.ignored).toEqual([
+      { id: "anthropic.claude-opus-4.7", reasons: ["old_model"] },
+      { id: "google.gemma-3-27b-it", reasons: ["not_chat_model"] },
+    ]);
+  });
 });

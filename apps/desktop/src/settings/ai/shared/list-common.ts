@@ -101,9 +101,40 @@ export const isDateSnapshot = (id: string): boolean => {
   return false;
 };
 
+const modelName = (id: string): string => {
+  const name = id.toLowerCase().split("/").pop()!;
+  const segments = name.split(".");
+  const providerIndex = segments.findIndex((segment) =>
+    [
+      "ai21",
+      "amazon",
+      "anthropic",
+      "cohere",
+      "deepseek",
+      "google",
+      "meta",
+      "minimax",
+      "mistral",
+      "moonshot",
+      "nvidia",
+      "openai",
+      "qwen",
+      "stability",
+      "twelvelabs",
+      "writer",
+      "xai",
+      "zai",
+    ].includes(segment),
+  );
+
+  return providerIndex >= 0 && providerIndex < segments.length - 1
+    ? segments.slice(providerIndex + 1).join(".")
+    : name;
+};
+
 export const isNonChatModel = (id: string): boolean => {
   const lowerId = id.toLowerCase();
-  const name = lowerId.includes("/") ? lowerId.split("/").pop()! : lowerId;
+  const name = modelName(id);
 
   if (/^o\d/.test(name)) return true;
   if (/^gpt-4o-/.test(name)) return true;
@@ -116,7 +147,7 @@ export const isNonChatModel = (id: string): boolean => {
 };
 
 export const isNonStreamingModel = (id: string): boolean => {
-  const name = id.toLowerCase().split("/").pop()!;
+  const name = modelName(id);
   return /^gpt-\d+(?:\.\d+)*-pro(?:$|-)/.test(name);
 };
 
@@ -135,8 +166,7 @@ export const removeNonStreamingModels = (
 };
 
 export const isOldModel = (id: string): boolean => {
-  const lowerId = id.toLowerCase();
-  const name = lowerId.includes("/") ? lowerId.split("/").pop()! : lowerId;
+  const name = modelName(id);
   const dashedName = name.replace(/\./g, "-");
 
   if (/^gpt-3\.5/.test(name)) return true;
