@@ -654,6 +654,7 @@ export function ClassicMainBody() {
             data-main-content-panel
             className="h-full min-h-0 min-w-0 flex-1 overflow-auto"
             onClickCapture={mainAreaTopDrag.onClickCapture}
+            onDoubleClickCapture={mainAreaTopDrag.onDoubleClickCapture}
             onPointerCancel={mainAreaTopDrag.onPointerEnd}
             onPointerDown={mainAreaTopDrag.onPointerDown}
             onPointerMove={mainAreaTopDrag.onPointerMove}
@@ -830,8 +831,33 @@ function useMainAreaTopWindowDrag(enabled: boolean) {
     [],
   );
 
+  const handleDoubleClickCapture = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (
+        !enabled ||
+        event.button !== 0 ||
+        isInteractiveMainAreaDragTarget(event.target) ||
+        isNativeWindowDragTarget(event.target) ||
+        !isWithinMainAreaTopDragRegion(event)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (isTauri()) {
+        void getCurrentWindow()
+          .toggleMaximize()
+          .catch(() => {});
+      }
+    },
+    [enabled],
+  );
+
   return {
     onClickCapture: handleClickCapture,
+    onDoubleClickCapture: handleDoubleClickCapture,
     onPointerDown: handlePointerDown,
     onPointerEnd: handlePointerEnd,
     onPointerMove: handlePointerMove,
@@ -839,7 +865,7 @@ function useMainAreaTopWindowDrag(enabled: boolean) {
 }
 
 function isWithinMainAreaTopDragRegion(
-  event: PointerEvent<HTMLDivElement>,
+  event: MouseEvent<HTMLDivElement> | PointerEvent<HTMLDivElement>,
 ): boolean {
   const rect = event.currentTarget.getBoundingClientRect();
   const offsetY = event.clientY - rect.top;
@@ -865,6 +891,17 @@ function isInteractiveMainAreaDragTarget(target: EventTarget | null): boolean {
         "[role='textbox']",
       ].join(","),
     ),
+  );
+}
+
+function isNativeWindowDragTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  return (
+    target.hasAttribute("data-tauri-drag-region") &&
+    target.getAttribute("data-tauri-drag-region") !== "false"
   );
 }
 
