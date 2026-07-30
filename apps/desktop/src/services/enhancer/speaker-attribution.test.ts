@@ -102,33 +102,54 @@ function createSnapshot(channel = 1): SessionContentSnapshot {
   };
 }
 
+function mockDirectCandidateMatches() {
+  mocks.generateText.mockImplementation(({ prompt }: { prompt: string }) => {
+    const payload = JSON.parse(prompt) as {
+      candidate: { human_id: string };
+      clusters: Array<{
+        cluster_id: string;
+        evidence: { id: string };
+      }>;
+    };
+    const speakerIndex = payload.candidate.human_id === "human-lex" ? 0 : 1;
+    const cluster = payload.clusters.find((candidate) =>
+      candidate.cluster_id.endsWith(`:${speakerIndex}`),
+    )!;
+
+    return Promise.resolve({
+      text: `Result:
+\`\`\`json
+${JSON.stringify({
+  mapping: {
+    cluster_id: cluster.cluster_id,
+    confidence: 0.98,
+    evidence_id: cluster.evidence.id,
+  },
+  candidate: payload.candidate,
+})}
+\`\`\``,
+    });
+  });
+}
+
+function automaticHumanIds(update: { nextSpeakerHintsJson: string }): string[] {
+  return JSON.parse(update.nextSpeakerHintsJson)
+    .filter(
+      (hint: { type: string }) => hint.type === "automatic_speaker_assignment",
+    )
+    .map(
+      (hint: { value: string }) =>
+        (JSON.parse(hint.value) as { human_id: string }).human_id,
+    );
+}
+
 describe("inferAutomaticSpeakerAssignments", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("creates guarded automatic hints from a complete high-confidence mapping", async () => {
-    mocks.generateText.mockResolvedValue({
-      text: `Here is the mapping:
-\`\`\`json
-${JSON.stringify({
-  mappings: [
-    {
-      cluster_id: "transcript-1:0",
-      human_id: "human-lex",
-      confidence: 0.98,
-      evidence_id: "evidence-1",
-    },
-    {
-      cluster_id: "transcript-1:1",
-      human_id: "human-george",
-      confidence: 0.97,
-      evidence: "evidence-1",
-    },
-  ],
-})}
-\`\`\``,
-    });
+  it("creates guarded automatic hints from direct candidate matches", async () => {
+    mockDirectCandidateMatches();
 
     const updates = await inferAutomaticSpeakerAssignments({
       generatedSummary:
@@ -138,102 +159,131 @@ ${JSON.stringify({
       signal: new AbortController().signal,
     });
 
+    expect(mocks.generateText).toHaveBeenCalledTimes(2);
+    const georgePrompt = JSON.parse(
+      mocks.generateText.mock.calls[0]![0].prompt,
+    );
+    expect(georgePrompt).toMatchObject({
+      candidate: {
+        human_id: "human-george",
+        summary_mentions: [
+          {
+            id: "summary-1",
+            quote: "George Hotz said Zuckerberg is a good guy.",
+          },
+        ],
+      },
+      clusters: [
+        {
+          cluster_id: "transcript-1:0",
+          evidence: {
+            id: "evidence-1",
+            quote:
+              "What do you think about open source Llama and the future of AI?",
+          },
+        },
+        {
+          cluster_id: "transcript-1:1",
+          evidence: {
+            id: "evidence-1",
+            quote:
+              "Zuckerberg is a good guy and open source matters undoubtedly.",
+          },
+        },
+      ],
+    });
     expect(updates).toEqual([
       expect.objectContaining({
         id: "transcript-1",
         currentWordsJson: "original words",
+        expectedParticipantHumanIdsJson: '["human-george","human-lex"]',
       }),
     ]);
-    expect(
-      JSON.parse(mocks.generateText.mock.calls[0]![0].prompt),
-    ).toMatchObject({
-      conversation_turns: [
-        {
-          cluster_id: "transcript-1:0",
-          quote:
-            "What do you think about open source Llama and the future of AI?",
-        },
-        {
-          cluster_id: "transcript-1:1",
-          quote:
-            "Zuckerberg is a good guy and open source matters undoubtedly.",
-        },
-      ],
-      clusters: [
-        {
-          id: "transcript-1:0",
-          evidence_candidates: [
-            {
-              id: "evidence-1",
-              quote:
-                "What do you think about open source Llama and the future of AI?",
-            },
-          ],
-        },
-        {
-          id: "transcript-1:1",
-          evidence_candidates: [
-            {
-              id: "evidence-1",
-              quote:
-                "Zuckerberg is a good guy and open source matters undoubtedly.",
-            },
-          ],
-        },
-      ],
-    });
-    expect(updates[0]!.expectedParticipantHumanIdsJson).toBe(
-      '["human-george","human-lex"]',
-    );
-    const nextHints = JSON.parse(updates[0]!.nextSpeakerHintsJson);
-    expect(
-      nextHints.filter(
-        (hint: { type: string }) =>
-          hint.type === "automatic_speaker_assignment",
-      ),
-    ).toEqual([
-      {
-        id: "lex-1:automatic_speaker_assignment",
-        word_id: "lex-1",
-        type: "automatic_speaker_assignment",
-        value: JSON.stringify({
-          human_id: "human-lex",
-          confidence: 0.98,
-          source: "enhance",
-        }),
-      },
-      {
-        id: "george-1:automatic_speaker_assignment",
-        word_id: "george-1",
-        type: "automatic_speaker_assignment",
-        value: JSON.stringify({
-          human_id: "human-george",
-          confidence: 0.97,
-          source: "enhance",
-        }),
-      },
+    expect(automaticHumanIds(updates[0]!)).toEqual([
+      "human-lex",
+      "human-george",
     ]);
   });
 
-  it("attributes diarized mixed-capture batch transcripts", async () => {
-    mocks.generateText.mockResolvedValue({
-      text: JSON.stringify({
-        mappings: [
-          {
-            cluster_id: "transcript-1:0",
-            human_id: "human-lex",
+  it("completes the final identity from one exclusive named match", async () => {
+    mocks.generateText.mockImplementation(({ prompt }: { prompt: string }) => {
+      const payload = JSON.parse(prompt) as {
+        candidate: { human_id: string };
+        clusters: Array<{
+          cluster_id: string;
+          evidence: { id: string };
+        }>;
+      };
+      expect(payload.candidate.human_id).toBe("human-george");
+      const cluster = payload.clusters.find((candidate) =>
+        candidate.cluster_id.endsWith(":1"),
+      )!;
+      return Promise.resolve({
+        text: JSON.stringify({
+          mapping: {
+            cluster_id: cluster.cluster_id,
             confidence: 0.98,
-            evidence_id: "evidence-1",
+            evidence_id: cluster.evidence.id,
           },
-          {
-            cluster_id: "transcript-1:1",
-            human_id: "human-george",
-            confidence: 0.97,
-            evidence_id: "evidence-1",
-          },
-        ],
-      }),
+        }),
+      });
     });
+
+    const updates = await inferAutomaticSpeakerAssignments({
+      generatedSummary: "George Hotz criticized OpenAI's AI safety marketing.",
+      model: {} as LanguageModel,
+      snapshot: createSnapshot(),
+      signal: new AbortController().signal,
+    });
+
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    expect(automaticHumanIds(updates[0]!)).toEqual([
+      "human-lex",
+      "human-george",
+    ]);
+  });
+
+  it("selects exclusive summary evidence and the most relevant cluster quote", async () => {
+    const snapshot = createSnapshot();
+    snapshot.transcripts[0]!.words[2]!.text = ` ${"irrelevant filler ".repeat(24)}OpenAI used AI safety to hype its company`;
+    mocks.generateText.mockResolvedValue({
+      text: JSON.stringify({ mapping: null }),
+    });
+
+    await inferAutomaticSpeakerAssignments({
+      generatedSummary:
+        "George Hotz and Lex Fridman discussed open source. George Hotz criticized OpenAI for using AI safety as marketing.",
+      model: {} as LanguageModel,
+      snapshot,
+      signal: new AbortController().signal,
+    });
+
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    const prompt = JSON.parse(mocks.generateText.mock.calls[0]![0].prompt);
+    expect(prompt.candidate).toMatchObject({
+      human_id: "human-george",
+      summary_mentions: [
+        {
+          quote:
+            "George Hotz criticized OpenAI for using AI safety as marketing.",
+        },
+      ],
+    });
+    expect(
+      prompt.clusters.find(
+        (cluster: { cluster_id: string }) =>
+          cluster.cluster_id === "transcript-1:1",
+      ),
+    ).toMatchObject({
+      evidence: {
+        id: "evidence-2",
+        quote: expect.stringContaining("OpenAI used AI safety"),
+      },
+    });
+  });
+
+  it("attributes diarized mixed-capture batch transcripts", async () => {
+    mockDirectCandidateMatches();
 
     const updates = await inferAutomaticSpeakerAssignments({
       generatedSummary:
@@ -243,79 +293,83 @@ ${JSON.stringify({
       signal: new AbortController().signal,
     });
 
-    expect(mocks.generateText).toHaveBeenCalledOnce();
-    expect(
-      JSON.parse(updates[0]!.nextSpeakerHintsJson).filter(
-        (hint: { type: string }) =>
-          hint.type === "automatic_speaker_assignment",
-      ),
-    ).toHaveLength(2);
+    expect(automaticHumanIds(updates[0]!)).toEqual([
+      "human-lex",
+      "human-george",
+    ]);
   });
 
-  it("retries a semantically invalid one-to-one mapping with validator feedback", async () => {
-    mocks.generateText
-      .mockResolvedValueOnce({
+  it.each([
+    {
+      name: "low confidence",
+      mapping: {
+        cluster_id: "transcript-1:1",
+        confidence: 0.8,
+        evidence_id: "evidence-1",
+      },
+    },
+    {
+      name: "unknown cluster",
+      mapping: {
+        cluster_id: "missing:1",
+        confidence: 0.98,
+        evidence_id: "evidence-1",
+      },
+    },
+    {
+      name: "unsupported evidence",
+      mapping: {
+        cluster_id: "transcript-1:1",
+        confidence: 0.98,
+        evidence_id: "not-supplied",
+      },
+    },
+  ])("rejects a $name candidate match", async ({ mapping }) => {
+    mocks.generateText.mockResolvedValue({
+      text: JSON.stringify({ mapping }),
+    });
+
+    await expect(
+      inferAutomaticSpeakerAssignments({
+        generatedSummary: "George Hotz discussed open source.",
+        model: {} as LanguageModel,
+        snapshot: createSnapshot(),
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it("fails closed when candidate matches collide on one cluster", async () => {
+    mocks.generateText.mockImplementation(({ prompt }: { prompt: string }) => {
+      const payload = JSON.parse(prompt) as {
+        clusters: Array<{
+          cluster_id: string;
+          evidence: { id: string };
+        }>;
+      };
+      const cluster = payload.clusters.find((candidate) =>
+        candidate.cluster_id.endsWith(":1"),
+      )!;
+      return Promise.resolve({
         text: JSON.stringify({
-          mappings: [
-            {
-              cluster_id: "transcript-1:0",
-              human_id: "human-lex",
-              confidence: 0.98,
-              evidence_id: "evidence-1",
-            },
-            {
-              cluster_id: "transcript-1:1",
-              human_id: "human-lex",
-              confidence: 0.97,
-              evidence_id: "evidence-1",
-            },
-          ],
-        }),
-      })
-      .mockResolvedValueOnce({
-        text: JSON.stringify({
-          mappings: [
-            {
-              cluster_id: "transcript-1:0",
-              human_id: "human-lex",
-              confidence: 0.98,
-              evidence_id: "evidence-1",
-            },
-            {
-              cluster_id: "transcript-1:1",
-              human_id: "human-george",
-              confidence: 0.97,
-              evidence_id: "evidence-1",
-            },
-          ],
+          mapping: {
+            cluster_id: cluster.cluster_id,
+            confidence: 0.98,
+            evidence_id: cluster.evidence.id,
+          },
         }),
       });
-
-    const updates = await inferAutomaticSpeakerAssignments({
-      generatedSummary:
-        "Lex Fridman asked about Llama. George Hotz discussed open source.",
-      model: {} as LanguageModel,
-      snapshot: createSnapshot(),
-      signal: new AbortController().signal,
     });
 
-    expect(mocks.generateText).toHaveBeenCalledTimes(2);
-    expect(
-      JSON.parse(mocks.generateText.mock.calls[1]![0].prompt),
-    ).toMatchObject({
-      retry_reason: "duplicate_human",
-      previous_mappings: [
-        {
-          cluster_id: "transcript-1:0",
-          human_id: "human-lex",
-        },
-        {
-          cluster_id: "transcript-1:1",
-          human_id: "human-lex",
-        },
-      ],
-    });
-    expect(updates).toHaveLength(1);
+    await expect(
+      inferAutomaticSpeakerAssignments({
+        generatedSummary:
+          "Lex Fridman asked about Llama. George Hotz discussed open source.",
+        model: {} as LanguageModel,
+        snapshot: createSnapshot(),
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual([]);
   });
 
   it("attributes recurring participants independently in each transcript", async () => {
@@ -343,19 +397,7 @@ ${JSON.stringify({
       })),
       speaker_hints: secondSpeakerHints,
     });
-    mocks.generateText.mockImplementation(({ prompt }: { prompt: string }) => {
-      const clusters = JSON.parse(prompt).clusters as Array<{ id: string }>;
-      return Promise.resolve({
-        text: JSON.stringify({
-          mappings: clusters.map((cluster, index) => ({
-            cluster_id: cluster.id,
-            human_id: index === 0 ? "human-lex" : "human-george",
-            confidence: 0.98,
-            evidence_id: "evidence-1",
-          })),
-        }),
-      });
-    });
+    mockDirectCandidateMatches();
 
     const updates = await inferAutomaticSpeakerAssignments({
       generatedSummary:
@@ -365,105 +407,13 @@ ${JSON.stringify({
       signal: new AbortController().signal,
     });
 
-    expect(mocks.generateText).toHaveBeenCalledTimes(2);
+    expect(mocks.generateText).toHaveBeenCalledTimes(4);
     expect(updates.map((update) => update.id)).toEqual([
       "transcript-1",
       "transcript-2",
     ]);
     for (const update of updates) {
-      const automaticHints = JSON.parse(update.nextSpeakerHintsJson).filter(
-        (hint: { type: string }) =>
-          hint.type === "automatic_speaker_assignment",
-      );
-      expect(
-        automaticHints.map(
-          (hint: { value: string }) => JSON.parse(hint.value).human_id,
-        ),
-      ).toEqual(["human-lex", "human-george"]);
-    }
-  });
-
-  it("rejects incomplete, duplicate, low-confidence, or unsupported mappings", async () => {
-    const invalidMappings = [
-      [
-        {
-          cluster_id: "transcript-1:0",
-          human_id: "human-lex",
-          confidence: 0.99,
-          evidence_id: "evidence-1",
-        },
-      ],
-      [
-        {
-          cluster_id: "transcript-1:0",
-          human_id: "human-lex",
-          confidence: 0.99,
-          evidence_id: "evidence-1",
-        },
-        {
-          cluster_id: "transcript-1:1",
-          human_id: "human-lex",
-          confidence: 0.99,
-          evidence_id: "evidence-1",
-        },
-      ],
-      [
-        {
-          cluster_id: "transcript-1:0",
-          human_id: "human-lex",
-          confidence: 1.1,
-          evidence_id: "evidence-1",
-        },
-        {
-          cluster_id: "transcript-1:1",
-          human_id: "human-george",
-          confidence: 0.99,
-          evidence_id: "evidence-1",
-        },
-      ],
-      [
-        {
-          cluster_id: "transcript-1:0",
-          human_id: "human-lex",
-          confidence: 0.8,
-          evidence_id: "evidence-1",
-        },
-        {
-          cluster_id: "transcript-1:1",
-          human_id: "human-george",
-          confidence: 0.99,
-          evidence_id: "evidence-1",
-        },
-      ],
-      [
-        {
-          cluster_id: "transcript-1:0",
-          human_id: "human-lex",
-          confidence: 0.99,
-          evidence_id: "not-supplied",
-        },
-        {
-          cluster_id: "transcript-1:1",
-          human_id: "human-george",
-          confidence: 0.99,
-          evidence_id: "evidence-1",
-        },
-      ],
-    ];
-
-    for (const mappings of invalidMappings) {
-      mocks.generateText.mockReset().mockResolvedValue({
-        text: `\`\`\`json\n${JSON.stringify({ mappings })}\n\`\`\``,
-      });
-      await expect(
-        inferAutomaticSpeakerAssignments({
-          generatedSummary:
-            "Lex Fridman asked about Llama. George Hotz said Zuckerberg is a good guy.",
-          model: {} as LanguageModel,
-          snapshot: createSnapshot(),
-          signal: new AbortController().signal,
-        }),
-      ).resolves.toEqual([]);
+      expect(automaticHumanIds(update)).toEqual(["human-lex", "human-george"]);
     }
   });
 
