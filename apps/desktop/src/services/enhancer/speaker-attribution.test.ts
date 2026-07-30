@@ -147,6 +147,18 @@ ${JSON.stringify({
     expect(
       JSON.parse(mocks.generateText.mock.calls[0]![0].prompt),
     ).toMatchObject({
+      conversation_turns: [
+        {
+          cluster_id: "transcript-1:0",
+          quote:
+            "What do you think about open source Llama and the future of AI?",
+        },
+        {
+          cluster_id: "transcript-1:1",
+          quote:
+            "Zuckerberg is a good guy and open source matters undoubtedly.",
+        },
+      ],
       clusters: [
         {
           id: "transcript-1:0",
@@ -292,6 +304,16 @@ ${JSON.stringify({
       JSON.parse(mocks.generateText.mock.calls[1]![0].prompt),
     ).toMatchObject({
       retry_reason: "duplicate_human",
+      previous_mappings: [
+        {
+          cluster_id: "transcript-1:0",
+          human_id: "human-lex",
+        },
+        {
+          cluster_id: "transcript-1:1",
+          human_id: "human-lex",
+        },
+      ],
     });
     expect(updates).toHaveLength(1);
   });
