@@ -57,12 +57,53 @@ FROM sessions AS session WHERE session.id = ? AND session.deleted_at IS NULL
 `;
 
 export async function createSession(options?: {
+  sessionId?: string;
+  ownerUserId?: string;
   title?: string;
   createdAt?: string;
-  entryPoint?: "new_note" | "start_listening" | "voice_memo_import";
+  entryPoint?:
+    | "new_note"
+    | "start_listening"
+    | "voice_memo_import"
+    | "watch_recording";
   trackCreated?: boolean;
 }): Promise<string> {
-  const sessionId = id();
+  const sessionId = options?.sessionId ?? id();
+  if (options?.sessionId) {
+    const existing = (
+      await execute<{ owner_user_id: string; deleted_at: string | null }>(
+        "SELECT owner_user_id, deleted_at FROM sessions WHERE id = ? LIMIT 1",
+        [sessionId],
+      )
+    )[0];
+    if (existing) {
+      if (
+        options.ownerUserId &&
+        existing.owner_user_id !== options.ownerUserId
+      ) {
+        throw new Error("Session owner does not match the requested owner");
+      }
+      if (existing.deleted_at) {
+        const restoredAt = nowIso();
+        await executeTransaction([
+          {
+            sql: "UPDATE sessions SET deleted_at = NULL, updated_at = ? WHERE id = ?",
+            params: [restoredAt, sessionId],
+          },
+          {
+            sql: "UPDATE session_documents SET deleted_at = NULL, updated_at = ? WHERE session_id = ?",
+            params: [restoredAt, sessionId],
+          },
+          {
+            sql: "UPDATE session_participants SET deleted_at = NULL, updated_at = ? WHERE session_id = ?",
+            params: [restoredAt, sessionId],
+          },
+        ]);
+      }
+      return sessionId;
+    }
+  }
+
   const participantId = id();
   const now = nowIso();
   const createdAt = options?.createdAt ?? now;
@@ -71,7 +112,14 @@ export async function createSession(options?: {
   await executeTransaction([
     {
       sql: SESSION_INSERT_SQL,
-      params: [sessionId, DEFAULT_USER_ID, title, "", createdAt, createdAt],
+      params: [
+        sessionId,
+        options?.ownerUserId ?? DEFAULT_USER_ID,
+        title,
+        "",
+        createdAt,
+        createdAt,
+      ],
     },
     { sql: NOTE_INSERT_SQL, params: [sessionId, "", now, now, sessionId] },
     { sql: SELF_HUMAN_UPSERT_SQL, params: [now, sessionId] },
