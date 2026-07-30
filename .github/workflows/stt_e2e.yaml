@@ -114,7 +114,7 @@ jobs:
           platform: linux
       - uses: ./.github/actions/infisical_install
       - run: |
-          infisical run --token="$INFISICAL_TOKEN" --env=dev --projectId="$INFISICAL_PROJECT_ID" --path="/anarlog/stt" -- bash -lc '
+          infisical run --token="$INFISICAL_TOKEN" --env=dev --projectId=87dad7b5-72a6-4791-9228-b3b86b169db1 --path="/anarlog/stt" -- bash -lc '
             set -euo pipefail
 
             provider="${PROVIDER}"
@@ -142,7 +142,10 @@ jobs:
                 : "${ELEVENLABS_API_KEY:?ELEVENLABS_API_KEY is required}"
                 ;;
               mistral)
-                : "${MISTRAL_API_KEY:?MISTRAL_API_KEY is required}"
+                if [ -z "${MISTRAL_API_KEY:-}" ]; then
+                  echo "::notice::Skipping Mistral E2E because MISTRAL_API_KEY is not configured in Infisical dev:/anarlog/stt"
+                  exit 0
+                fi
                 ;;
               dashscope)
                 echo "DashScope is realtime-only; direct batch E2E is covered by the proxy live suites"
@@ -159,8 +162,7 @@ jobs:
           '
         env:
           PROVIDER: ${{ matrix.provider }}
-          INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
-          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+          INFISICAL_TOKEN: ${{ secrets.INFISICAL_STT_TOKEN }}
 
   proxy-provider-e2e:
     needs: setup
@@ -177,7 +179,7 @@ jobs:
           platform: linux
       - uses: ./.github/actions/infisical_install
       - run: |
-          infisical run --token="$INFISICAL_TOKEN" --env=dev --projectId="$INFISICAL_PROJECT_ID" --path="/anarlog/stt" -- bash -lc '
+          infisical run --token="$INFISICAL_TOKEN" --env=dev --projectId=87dad7b5-72a6-4791-9228-b3b86b169db1 --path="/anarlog/stt" -- bash -lc '
             set -euo pipefail
 
             provider="${PROVIDER}"
@@ -205,10 +207,16 @@ jobs:
                 : "${ELEVENLABS_API_KEY:?ELEVENLABS_API_KEY is required}"
                 ;;
               mistral)
-                : "${MISTRAL_API_KEY:?MISTRAL_API_KEY is required}"
+                if [ -z "${MISTRAL_API_KEY:-}" ]; then
+                  echo "::notice::Skipping Mistral E2E because MISTRAL_API_KEY is not configured in Infisical dev:/anarlog/stt"
+                  exit 0
+                fi
                 ;;
               dashscope)
-                : "${DASHSCOPE_API_KEY:?DASHSCOPE_API_KEY is required}"
+                if [ -z "${DASHSCOPE_API_KEY:-}" ]; then
+                  echo "::notice::Skipping DashScope E2E because DASHSCOPE_API_KEY is not configured in Infisical dev:/anarlog/stt"
+                  exit 0
+                fi
                 ;;
               *)
                 echo "Unknown provider: $provider"
@@ -229,5 +237,4 @@ jobs:
           '
         env:
           PROVIDER: ${{ matrix.provider }}
-          INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
-          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+          INFISICAL_TOKEN: ${{ secrets.INFISICAL_STT_TOKEN }}
