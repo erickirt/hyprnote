@@ -275,10 +275,16 @@ private struct FileTranscriptionPayload: Codable {
   var error: String?
 }
 
-private struct LivePartialPayload: Codable {
-  var source: String
-  var text: String
-  var isFinal: Bool
+private final class LivePartialPayload: Codable {
+  let source: String
+  let text: String
+  let isFinal: Bool
+
+  init(source: String, text: String, isFinal: Bool) {
+    self.source = source
+    self.text = text
+    self.isFinal = isFinal
+  }
 }
 
 private struct LiveAppendPayload: Codable {
