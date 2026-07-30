@@ -4,6 +4,8 @@ import type { ChatEditorHandle, JSONContent } from "@anlg/editor/chat";
 import { EMPTY_DOC } from "@anlg/editor/markdown";
 import { commands as analyticsCommands } from "@anlg/plugin-analytics";
 
+import { pushSentMessage, sentMessageAt, sentMessageCount } from "./history";
+
 import type { ContextRef } from "~/chat/context/entities";
 
 const draftsByKey = new Map<string, JSONContent>();
@@ -12,10 +14,14 @@ export function useDraftState({
   draftKey,
   onDraftContentChange,
   onContextRefsChange,
+  onUserEdit,
+  shouldPersistUpdate,
 }: {
   draftKey: string;
   onDraftContentChange?: (hasDraftContent: boolean) => void;
   onContextRefsChange?: (refs: ContextRef[]) => void;
+  onUserEdit?: () => void;
+  shouldPersistUpdate?: () => boolean;
 }) {
   const initialContent = useRef(draftsByKey.get(draftKey) ?? EMPTY_DOC);
   const [hasContent, setHasContent] = useState(() =>
@@ -32,11 +38,23 @@ export function useDraftState({
   const handleEditorUpdate = useCallback(
     (json: JSONContent) => {
       setHasContent(hasTextContent(json));
-      draftsByKey.set(draftKey, json);
+      const shouldPersist = shouldPersistUpdate?.() ?? true;
+      if (shouldPersist) {
+        draftsByKey.set(draftKey, json);
+      }
       onDraftContentChange?.(hasDraftContent(json));
       onContextRefsChange?.(extractContextRefsFromTiptapJson(json));
+      if (shouldPersist) {
+        onUserEdit?.();
+      }
     },
-    [draftKey, onDraftContentChange, onContextRefsChange],
+    [
+      draftKey,
+      onDraftContentChange,
+      onContextRefsChange,
+      onUserEdit,
+      shouldPersistUpdate,
+    ],
   );
 
   return {
@@ -53,6 +71,7 @@ export function useSubmit({
   onSendMessage,
   onDraftContentChange,
   onContextRefsChange,
+  onSubmitted,
 }: {
   draftKey: string;
   editorRef: React.RefObject<ChatEditorHandle | null>;
@@ -65,6 +84,7 @@ export function useSubmit({
   ) => void;
   onDraftContentChange?: (hasDraftContent: boolean) => void;
   onContextRefsChange?: (refs: ContextRef[]) => void;
+  onSubmitted?: (json: JSONContent | undefined) => void;
 }) {
   return useCallback(() => {
     const json = editorRef.current?.getJSON();
@@ -81,6 +101,7 @@ export function useSubmit({
     draftsByKey.delete(draftKey);
     onDraftContentChange?.(false);
     onContextRefsChange?.([]);
+    onSubmitted?.(json);
   }, [
     draftKey,
     editorRef,
@@ -88,7 +109,89 @@ export function useSubmit({
     onSendMessage,
     onDraftContentChange,
     onContextRefsChange,
+    onSubmitted,
   ]);
+}
+
+export function useMessageHistory({
+  editorRef,
+}: {
+  editorRef: React.RefObject<ChatEditorHandle | null>;
+}) {
+  const [index, setIndex] = useState<number | null>(null);
+  const draftBeforeHistory = useRef<JSONContent | undefined>(undefined);
+  const isApplyingRef = useRef(false);
+
+  const applyContent = useCallback(
+    (content: JSONContent | undefined, selection: "start" | "end") => {
+      isApplyingRef.current = true;
+      editorRef.current?.replaceContent(content ?? EMPTY_DOC, selection);
+      isApplyingRef.current = false;
+    },
+    [editorRef],
+  );
+
+  const navigate = useCallback(
+    (direction: "prev" | "next") => {
+      if (direction === "prev") {
+        const total = sentMessageCount();
+        if (total === 0) {
+          return false;
+        }
+
+        const next = index === null ? 0 : index + 1;
+        if (next >= total) {
+          return true;
+        }
+
+        if (index === null) {
+          draftBeforeHistory.current = editorRef.current?.getJSON();
+        }
+        setIndex(next);
+        applyContent(sentMessageAt(next), "start");
+        return true;
+      }
+
+      if (index === null) {
+        return false;
+      }
+
+      if (index === 0) {
+        setIndex(null);
+        applyContent(draftBeforeHistory.current, "end");
+        return true;
+      }
+
+      setIndex(index - 1);
+      applyContent(sentMessageAt(index - 1), "end");
+      return true;
+    },
+    [applyContent, editorRef, index],
+  );
+
+  const handleUserEdit = useCallback(() => {
+    if (isApplyingRef.current) {
+      return;
+    }
+    setIndex(null);
+  }, []);
+
+  const shouldPersistUpdate = useCallback(() => !isApplyingRef.current, []);
+
+  const handleSubmitted = useCallback((json: JSONContent | undefined) => {
+    pushSentMessage(json);
+    draftBeforeHistory.current = undefined;
+    setIndex(null);
+  }, []);
+
+  return {
+    position: index === null ? null : index + 1,
+    total: sentMessageCount(),
+    navigate,
+    handleUserEdit,
+    handleSubmitted,
+    shouldPersistUpdate,
+  };
 }
 
 export function useAutoFocusEditor({
