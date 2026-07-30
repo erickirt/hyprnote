@@ -99,7 +99,7 @@ export const shouldIgnoreCommonKeywords = (id: string): boolean => {
 export const isDateSnapshot = (id: string): boolean => {
   if (/-\d{4}-\d{2}-\d{2}/.test(id)) return true;
   if (/-\d{8}$/.test(id)) return true;
-  if (/-\d{4}$/.test(id)) return true;
+  if (/-20\d{2}$/.test(id)) return true;
   return false;
 };
 
@@ -111,7 +111,6 @@ export const isNonChatModel = (id: string): boolean => {
   if (/^gpt-4o-/.test(name)) return true;
   if (/^gpt-4\.1/.test(name)) return true;
   if (name.startsWith("ft:") || lowerId.startsWith("ft:")) return true;
-  if (/^gemma/.test(name)) return true;
   if (/^nano-banana/.test(name)) return true;
 
   return false;

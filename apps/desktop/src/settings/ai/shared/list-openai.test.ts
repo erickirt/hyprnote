@@ -31,10 +31,12 @@ describe("processGenericModels", () => {
       { id: "anthropic.claude-opus-5" },
     ]);
 
-    expect(result.models).toEqual(["anthropic.claude-opus-5"]);
+    expect(result.models).toEqual([
+      "anthropic.claude-opus-5",
+      "google.gemma-3-27b-it",
+    ]);
     expect(result.ignored).toEqual([
       { id: "anthropic.claude-opus-4.7", reasons: ["old_model"] },
-      { id: "google.gemma-3-27b-it", reasons: ["not_chat_model"] },
     ]);
   });
 });

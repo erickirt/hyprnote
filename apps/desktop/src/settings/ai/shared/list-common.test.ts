@@ -1,11 +1,20 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  isDateSnapshot,
   isNonStreamingModel,
   isOldModel,
   removeNonStreamingModels,
   sortModelsByRecency,
 } from "./list-common";
+
+describe("isDateSnapshot", () => {
+  test("keeps provider version and context suffixes", () => {
+    expect(isDateSnapshot("llama-3.1-8b-instant-8192")).toBe(false);
+    expect(isDateSnapshot("grok-4-0709")).toBe(false);
+    expect(isDateSnapshot("command-a-plus-05-2026")).toBe(true);
+  });
+});
 
 describe("isNonStreamingModel", () => {
   test("filters GPT Pro models without hiding streaming-capable models", () => {
