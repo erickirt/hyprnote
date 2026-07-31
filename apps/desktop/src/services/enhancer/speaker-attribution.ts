@@ -558,20 +558,24 @@ function buildCandidateSummaryMentions(
   candidateName: string,
   candidates: SpeakerAttributionContext["candidates"],
 ) {
-  const normalizedName = candidateName.toLocaleLowerCase();
-  const otherNames = candidates
+  const candidateAliases = buildCandidateNameAliases(candidateName, candidates);
+  const otherAliases = candidates
     .filter((candidate) => candidate.name !== candidateName)
-    .map((candidate) => candidate.name.toLocaleLowerCase());
+    .flatMap((candidate) => buildCandidateExclusionAliases(candidate.name));
   const sentences = summary
     .split(/\r?\n/u)
     .flatMap((line) => line.match(/[^.!?]+[.!?]?/gu) ?? [])
     .map(normalizeWhitespace)
     .flatMap((sentence) => {
-      const normalizedSentence = sentence.toLocaleLowerCase();
-      if (!normalizedSentence.includes(normalizedName)) {
+      if (!containsNameAlias(sentence, candidateAliases)) {
         return [];
       }
-      if (otherNames.every((name) => !normalizedSentence.includes(name))) {
+      if (
+        !containsNameAlias(
+          removeNameAliases(sentence, candidateAliases),
+          otherAliases,
+        )
+      ) {
         return [sentence];
       }
 
@@ -579,10 +583,12 @@ function buildCandidateSummaryMentions(
         .split(/[,;]\s+(?:and\s+)?|\s+[—–]\s+/u)
         .map(normalizeWhitespace)
         .filter((clause) => {
-          const normalizedClause = clause.toLocaleLowerCase();
           return (
-            normalizedClause.startsWith(normalizedName) &&
-            otherNames.every((name) => !normalizedClause.includes(name))
+            startsWithNameAlias(clause, candidateAliases) &&
+            !containsNameAlias(
+              removeNameAliases(clause, candidateAliases),
+              otherAliases,
+            )
           );
         });
     });
@@ -593,6 +599,148 @@ function buildCandidateSummaryMentions(
       id: `summary-${index + 1}`,
       quote: quote.slice(0, MAX_SUMMARY_MENTION_LENGTH),
     }));
+}
+
+function buildCandidateNameAliases(
+  candidateName: string,
+  candidates: SpeakerAttributionContext["candidates"],
+) {
+  const normalizedName = normalizeWhitespace(candidateName).toLocaleLowerCase();
+  const givenName = getCandidateGivenNameAlias(normalizedName);
+  if (!givenName) {
+    return [{ value: normalizedName, isGivenName: false }];
+  }
+
+  const isUnique = candidates
+    .filter((candidate) => candidate.name !== candidateName)
+    .every(
+      (candidate) =>
+        getCandidateGivenNameAlias(
+          normalizeWhitespace(candidate.name).toLocaleLowerCase(),
+        ) !== givenName,
+    );
+
+  return isUnique
+    ? [
+        { value: normalizedName, isGivenName: false },
+        { value: givenName, isGivenName: true },
+      ]
+    : [{ value: normalizedName, isGivenName: false }];
+}
+
+function buildCandidateExclusionAliases(candidateName: string) {
+  const normalizedName = normalizeWhitespace(candidateName).toLocaleLowerCase();
+  const givenName = getCandidateGivenNameAlias(normalizedName);
+  return givenName
+    ? [
+        { value: normalizedName, isGivenName: false },
+        { value: givenName, isGivenName: true },
+      ]
+    : [{ value: normalizedName, isGivenName: false }];
+}
+
+function getCandidateGivenNameAlias(normalizedName: string) {
+  const givenName = normalizedName.match(
+    /^[\p{L}\p{N}]+(?:[-‐‑‒–—―'’][\p{L}\p{N}]+)*/u,
+  )?.[0];
+  return givenName &&
+    givenName.length >= 3 &&
+    !ATTRIBUTION_STOP_WORDS.has(givenName)
+    ? givenName
+    : undefined;
+}
+
+function removeNameAliases(
+  value: string,
+  aliases: Array<{ value: string; isGivenName: boolean }>,
+) {
+  return aliases.reduce(
+    (remaining, alias) =>
+      remaining.replace(
+        buildNameAliasRegExp(alias, "giu"),
+        (match, offset: number) =>
+          alias.isGivenName &&
+          hasProperNameAffix(
+            remaining,
+            offset + match.length - alias.value.length,
+            offset + match.length,
+          )
+            ? match
+            : " ",
+      ),
+    value,
+  );
+}
+
+function containsNameAlias(
+  value: string,
+  aliases: Array<{ value: string; isGivenName: boolean }>,
+) {
+  return aliases.some((alias) => {
+    const pattern = buildNameAliasRegExp(alias, "giu");
+    let match = pattern.exec(value);
+    while (match) {
+      if (
+        !alias.isGivenName ||
+        !hasProperNameAffix(
+          value,
+          pattern.lastIndex - alias.value.length,
+          pattern.lastIndex,
+        )
+      ) {
+        return true;
+      }
+      match = pattern.exec(value);
+    }
+    return false;
+  });
+}
+
+function startsWithNameAlias(
+  value: string,
+  aliases: Array<{ value: string; isGivenName: boolean }>,
+) {
+  return aliases.some((alias) => {
+    const matches = new RegExp(
+      `^${escapeRegExp(alias.value)}(?=$|[^\\p{L}\\p{N}])`,
+      "iu",
+    ).test(value);
+    return (
+      matches &&
+      (!alias.isGivenName || !hasProperNameAffix(value, 0, alias.value.length))
+    );
+  });
+}
+
+function buildNameAliasRegExp(
+  alias: { value: string; isGivenName: boolean },
+  flags: string,
+) {
+  return new RegExp(
+    `(?:^|[^\\p{L}\\p{N}])${escapeRegExp(alias.value)}(?=$|[^\\p{L}\\p{N}])`,
+    flags,
+  );
+}
+
+function hasProperNameAffix(value: string, start: number, end: number) {
+  const prefix = value.slice(0, start);
+  const precedingToken = prefix.match(
+    /(?:^|[^\p{L}\p{N}])(\p{Lu}[\p{L}\p{N}]*(?:[-‐‑‒–—―'’][\p{L}\p{N}]+)*|\p{Lu}\.)\s+$/u,
+  )?.[1];
+  return (
+    /[\p{L}\p{N}][-‐‑‒–—―'’]$/u.test(prefix) ||
+    Boolean(
+      precedingToken &&
+      !ATTRIBUTION_STOP_WORDS.has(
+        precedingToken.replace(/\.$/u, "").toLocaleLowerCase(),
+      ),
+    ) ||
+    /^(?:\s+\p{Lu}|[-‐‑‒–—―'’]\p{Lu})/u.test(value.slice(end))
+  );
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function selectRelevantEvidence(
@@ -619,7 +767,7 @@ function selectRelevantEvidence(
 }
 
 const ATTRIBUTION_STOP_WORDS = new Set(
-  "about after again against all also among and any are around because been before being below between both but can could did does doing down during each few for from further had has have having here how into its itself just more most other our ours out over own same should some such than that the their theirs them themselves then there these they this those through under until very was were what when where which while who whom why will with would you your yours yourself yourselves".split(
+  "about after again against all also among and any are around as because been before being below between both but can could did does doing down during each few for from further had has have having here how if into its itself just may more most once other our ours out over own same should since some such than that the their theirs them themselves then there these they this those though through under unless until very was were what when whenever where whereas whether which while who whom why will with would you your yours yourself yourselves".split(
     " ",
   ),
 );

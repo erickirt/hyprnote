@@ -243,6 +243,211 @@ describe("inferAutomaticSpeakerAssignments", () => {
     ]);
   });
 
+  it("matches unique given names in generated summaries", async () => {
+    mockDirectCandidateMatches();
+
+    const updates = await inferAutomaticSpeakerAssignments({
+      generatedSummary:
+        "Lex mentions his conversation with Mark Zuckerberg. George strongly endorses open source AI.",
+      model: {} as LanguageModel,
+      snapshot: createSnapshot(),
+      signal: new AbortController().signal,
+    });
+
+    expect(mocks.generateText).toHaveBeenCalledTimes(2);
+    expect(automaticHumanIds(updates[0]!)).toEqual([
+      "human-lex",
+      "human-george",
+    ]);
+  });
+
+  it("does not use a given name shared by multiple participants", async () => {
+    const snapshot = createSnapshot();
+    snapshot.participants[0]!.name = "Alex Smith";
+    snapshot.participants[1]!.name = "Alex Jones";
+
+    await expect(
+      inferAutomaticSpeakerAssignments({
+        generatedSummary: "Alex discussed open source AI.",
+        model: {} as LanguageModel,
+        snapshot,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual([]);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Will Smith", "will"],
+    ["May Jones", "may"],
+  ])(
+    "does not treat common words as given-name evidence for %s",
+    async (participantName, commonWord) => {
+      const snapshot = createSnapshot();
+      snapshot.participants[0]!.name = participantName;
+      mocks.generateText.mockResolvedValue({
+        text: JSON.stringify({ mapping: null }),
+      });
+
+      await inferAutomaticSpeakerAssignments({
+        generatedSummary: `George Hotz ${commonWord} discuss open source AI.`,
+        model: {} as LanguageModel,
+        snapshot,
+        signal: new AbortController().signal,
+      });
+
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      const prompt = JSON.parse(mocks.generateText.mock.calls[0]![0].prompt);
+      expect(prompt.candidate.human_id).toBe("human-george");
+    },
+  );
+
+  it("does not treat a third-party full name as given-name evidence", async () => {
+    const snapshot = createSnapshot();
+    snapshot.participants[0]!.name = "Mark Smith";
+    mocks.generateText.mockResolvedValue({
+      text: JSON.stringify({ mapping: null }),
+    });
+
+    await inferAutomaticSpeakerAssignments({
+      generatedSummary: "George Hotz discussed Mark Zuckerberg.",
+      model: {} as LanguageModel,
+      snapshot,
+      signal: new AbortController().signal,
+    });
+
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    const prompt = JSON.parse(mocks.generateText.mock.calls[0]![0].prompt);
+    expect(prompt.candidate.human_id).toBe("human-george");
+  });
+
+  it("does not treat a third-party surname as given-name evidence", async () => {
+    const snapshot = createSnapshot();
+    snapshot.participants[0]!.name = "Jane Doe";
+    mocks.generateText.mockResolvedValue({
+      text: JSON.stringify({ mapping: null }),
+    });
+
+    await inferAutomaticSpeakerAssignments({
+      generatedSummary: "George Hotz discussed Mary Jane.",
+      model: {} as LanguageModel,
+      snapshot,
+      signal: new AbortController().signal,
+    });
+
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    const prompt = JSON.parse(mocks.generateText.mock.calls[0]![0].prompt);
+    expect(prompt.candidate.human_id).toBe("human-george");
+  });
+
+  it.each(["As", "When", "While"])(
+    "matches a standalone given name after %s",
+    async (prefix) => {
+      const snapshot = createSnapshot();
+      snapshot.participants[0]!.name = "Jane Doe";
+      mocks.generateText.mockResolvedValue({
+        text: JSON.stringify({ mapping: null }),
+      });
+
+      await inferAutomaticSpeakerAssignments({
+        generatedSummary: `${prefix} Jane discussed open source AI.`,
+        model: {} as LanguageModel,
+        snapshot,
+        signal: new AbortController().signal,
+      });
+
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      const prompt = JSON.parse(mocks.generateText.mock.calls[0]![0].prompt);
+      expect(prompt.candidate.human_id).toBe("human-lex");
+    },
+  );
+
+  it("keeps standalone names distinct from joined given names", async () => {
+    const snapshot = createSnapshot();
+    snapshot.participants[0]!.name = "Mary-Jane Smith";
+    snapshot.participants[1]!.name = "Jane Doe";
+    mocks.generateText.mockResolvedValue({
+      text: JSON.stringify({ mapping: null }),
+    });
+
+    await inferAutomaticSpeakerAssignments({
+      generatedSummary: "Jane discussed open source AI.",
+      model: {} as LanguageModel,
+      snapshot,
+      signal: new AbortController().signal,
+    });
+
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    const prompt = JSON.parse(mocks.generateText.mock.calls[0]![0].prompt);
+    expect(prompt.candidate.human_id).toBe("human-george");
+  });
+
+  it.each(["Mary-Jane Smith", "Mary'Jane Smith"])(
+    "uses the full joined given name as evidence in %s",
+    async (joinedName) => {
+      const snapshot = createSnapshot();
+      snapshot.participants[0]!.name = joinedName;
+      snapshot.participants[1]!.name = "Jane Doe";
+      mocks.generateText.mockResolvedValue({
+        text: JSON.stringify({ mapping: null }),
+      });
+
+      await inferAutomaticSpeakerAssignments({
+        generatedSummary: `${joinedName.split(" ")[0]} discussed open source AI.`,
+        model: {} as LanguageModel,
+        snapshot,
+        signal: new AbortController().signal,
+      });
+
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      const prompt = JSON.parse(mocks.generateText.mock.calls[0]![0].prompt);
+      expect(prompt.candidate.human_id).toBe("human-lex");
+    },
+  );
+
+  it("does not shorten a joined given name to its first token", async () => {
+    const snapshot = createSnapshot();
+    snapshot.participants[0]!.name = "Mary-Jane Smith";
+
+    await expect(
+      inferAutomaticSpeakerAssignments({
+        generatedSummary: "Mary discussed open source AI.",
+        model: {} as LanguageModel,
+        snapshot,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual([]);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it("excludes shared given names that refer to another participant", async () => {
+    const snapshot = createSnapshot();
+    snapshot.participants[0]!.name = "Alex Smith";
+    snapshot.participants[1]!.name = "Alex Jones";
+    mocks.generateText.mockResolvedValue({
+      text: JSON.stringify({ mapping: null }),
+    });
+
+    await inferAutomaticSpeakerAssignments({
+      generatedSummary:
+        "Alex Smith supported open source AI, and Alex disagreed with the approach.",
+      model: {} as LanguageModel,
+      snapshot,
+      signal: new AbortController().signal,
+    });
+
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    const prompt = JSON.parse(mocks.generateText.mock.calls[0]![0].prompt);
+    expect(prompt.candidate).toMatchObject({
+      human_id: "human-lex",
+      summary_mentions: [
+        {
+          quote: "Alex Smith supported open source AI",
+        },
+      ],
+    });
+  });
+
   it("uses an exclusive clause when a summary sentence names both candidates", async () => {
     mocks.generateText.mockImplementation(({ prompt }: { prompt: string }) => {
       const payload = JSON.parse(prompt) as {
