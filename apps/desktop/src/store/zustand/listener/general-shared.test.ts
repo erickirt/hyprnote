@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   type GeneralState,
   initialGeneralState,
+  isBatchTranscriptionPending,
   markLiveCaptureStarted,
   markLiveFinalizing,
   markLiveStartRequested,
@@ -12,6 +13,41 @@ import {
   TRANSCRIPTION_STALL_AUDIBLE_SECONDS,
   tickTranscriptionStallWatchdog,
 } from "./general-shared";
+
+describe("isBatchTranscriptionPending", () => {
+  it.each([
+    ["active", false, false, true],
+    ["active", true, false, true],
+    ["finalizing", false, false, true],
+    ["finalizing", true, true, false],
+    ["running_batch", null, null, true],
+    ["active", true, true, false],
+    ["inactive", false, false, false],
+  ] as const)(
+    "handles mode %s with requested=%s and active=%s",
+    (sessionMode, requested, active, expected) => {
+      expect(
+        isBatchTranscriptionPending(sessionMode, {
+          requestedLiveTranscription: requested,
+          liveTranscriptionActive: active,
+        }),
+      ).toBe(expected);
+    },
+  );
+
+  it("covers the post-stop gap before batch processing starts", () => {
+    expect(
+      isBatchTranscriptionPending(
+        "inactive",
+        {
+          requestedLiveTranscription: null,
+          liveTranscriptionActive: null,
+        },
+        true,
+      ),
+    ).toBe(true);
+  });
+});
 
 function createLive(): GeneralState["live"] {
   return {
