@@ -19,3 +19,7 @@ export const Radius = {
   card: 14,
   pill: 28,
 } as const;
+
+export const CornerCurve = {
+  squircle: "continuous",
+} as const;
