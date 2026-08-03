@@ -48,4 +48,28 @@ describe("sendLoopsTransactional", () => {
       }),
     ).resolves.toBeUndefined();
   });
+
+  it("retries Loops rate limits", async () => {
+    let requests = 0;
+
+    await sendLoopsTransactional({
+      apiKey: "loops-key",
+      transactionalId: "transactional-123",
+      email: "alex@example.com",
+      dataVariables: { firstName: "Alex" },
+      idempotencyKey: "stripe-event-123",
+      fetcher: async () => {
+        requests += 1;
+        if (requests === 1) {
+          return Response.json(
+            { success: false, message: "Too many requests." },
+            { status: 429, headers: { "Retry-After": "0" } },
+          );
+        }
+        return Response.json({ success: true });
+      },
+    });
+
+    expect(requests).toBe(2);
+  });
 });

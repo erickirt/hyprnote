@@ -1,9 +1,18 @@
 const LOOPS_TRANSACTIONAL_URL = "https://app.loops.so/api/v1/transactional";
+const MAX_RATE_LIMIT_RETRIES = 3;
 
 type Fetcher = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
+
+function getRetryDelayMs(response: Response) {
+  const retryAfterSeconds = Number(response.headers.get("Retry-After") ?? "1");
+  if (!Number.isFinite(retryAfterSeconds) || retryAfterSeconds < 0) {
+    return 1_000;
+  }
+  return Math.min(retryAfterSeconds * 1_000, 5_000);
+}
 
 export async function sendLoopsTransactional({
   apiKey,
@@ -20,7 +29,7 @@ export async function sendLoopsTransactional({
   idempotencyKey: string;
   fetcher?: Fetcher;
 }) {
-  const response = await fetcher(LOOPS_TRANSACTIONAL_URL, {
+  const request = {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -32,9 +41,19 @@ export async function sendLoopsTransactional({
       email,
       dataVariables,
     }),
-  });
+  } satisfies RequestInit;
 
-  if (!response.ok && response.status !== 409) {
+  for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
+    const response = await fetcher(LOOPS_TRANSACTIONAL_URL, request);
+    if (response.ok || response.status === 409) {
+      return;
+    }
+    if (response.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, getRetryDelayMs(response)),
+      );
+      continue;
+    }
     throw new Error(
       `Loops transactional send failed (${response.status}): ${await response.text()}`,
     );
