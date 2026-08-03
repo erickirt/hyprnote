@@ -72,3 +72,18 @@ test("surfaces Loops API errors", async () => {
     /Loops request failed \(401\): invalid token/,
   );
 });
+
+test("accepts an already processed idempotency key", async () => {
+  await sendLoopsTransactional({
+    apiKey: "loops-key",
+    transactionalId: "transactional-123",
+    email: "alex@example.com",
+    dataVariables: { firstName: "Alex" },
+    idempotencyKey: "trial-ending:sub-123:1785945600",
+    fetcher: async () =>
+      Response.json(
+        { success: false, message: "Request has already been processed." },
+        { status: 409 },
+      ),
+  });
+});

@@ -34,7 +34,7 @@ export async function sendLoopsTransactional({
     }),
   });
 
-  if (!response.ok) {
+  if (!response.ok && response.status !== 409) {
     throw new Error(
       `Loops transactional send failed (${response.status}): ${await response.text()}`,
     );

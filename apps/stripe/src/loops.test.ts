@@ -28,4 +28,24 @@ describe("sendLoopsTransactional", () => {
       dataVariables: { firstName: "Alex" },
     });
   });
+
+  it("accepts an already processed idempotency key", async () => {
+    await expect(
+      sendLoopsTransactional({
+        apiKey: "loops-key",
+        transactionalId: "transactional-123",
+        email: "alex@example.com",
+        dataVariables: { firstName: "Alex" },
+        idempotencyKey: "stripe-event-123",
+        fetcher: async () =>
+          Response.json(
+            {
+              success: false,
+              message: "Request has already been processed.",
+            },
+            { status: 409 },
+          ),
+      }),
+    ).resolves.toBeUndefined();
+  });
 });

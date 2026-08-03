@@ -23,7 +23,7 @@ async function sendLoopsRequest({
     body: JSON.stringify(body),
   });
 
-  if (!response.ok) {
+  if (!response.ok && response.status !== 409) {
     throw new Error(
       `Loops request failed (${response.status}): ${await response.text()}`,
     );
