@@ -1,4 +1,13 @@
 const LOOPS_API_URL = "https://app.loops.so/api/v1";
+const MAX_RATE_LIMIT_RETRIES = 3;
+
+function getRetryDelayMs(response: Response) {
+  const retryAfterSeconds = Number(response.headers.get("Retry-After") ?? "1");
+  if (!Number.isFinite(retryAfterSeconds) || retryAfterSeconds < 0) {
+    return 1_000;
+  }
+  return Math.min(retryAfterSeconds * 1_000, 5_000);
+}
 
 async function sendLoopsRequest({
   path,
@@ -13,7 +22,7 @@ async function sendLoopsRequest({
   body: Record<string, unknown>;
   fetcher: typeof fetch;
 }) {
-  const response = await fetcher(`${LOOPS_API_URL}${path}`, {
+  const request = {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -21,9 +30,19 @@ async function sendLoopsRequest({
       "Idempotency-Key": idempotencyKey,
     },
     body: JSON.stringify(body),
-  });
+  } satisfies RequestInit;
 
-  if (!response.ok && response.status !== 409) {
+  for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
+    const response = await fetcher(`${LOOPS_API_URL}${path}`, request);
+    if (response.ok || response.status === 409) {
+      return;
+    }
+    if (response.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, getRetryDelayMs(response)),
+      );
+      continue;
+    }
     throw new Error(
       `Loops request failed (${response.status}): ${await response.text()}`,
     );
