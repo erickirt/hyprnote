@@ -6,9 +6,10 @@ import {
   getUserIdFromCustomer,
 } from "./billing-bridge";
 import { env } from "./env";
+import { sendLoopsTransactional } from "./loops";
 import { buildTrialEndingEmail } from "./trial-email-payload";
 
-const LOOPS_TRANSACTIONAL_URL = "https://app.loops.so/api/v1/transactional";
+const TRIAL_FINAL_REMINDER_TRANSACTIONAL_ID = "cmryjal6600130jvelcx1sol2";
 
 export type TrialEndingEmailReceipt = {
   transactionalId: string;
@@ -21,7 +22,7 @@ export async function sendTrialEndingEmail(event: Stripe.Event) {
     return null;
   }
 
-  if (!env.LOOPS_API_KEY || !env.LOOPS_TRIAL_ENDING_TRANSACTIONAL_ID) {
+  if (!env.LOOPS_API_KEY) {
     return null;
   }
 
@@ -45,30 +46,16 @@ export async function sendTrialEndingEmail(event: Stripe.Event) {
     return null;
   }
 
-  const response = await fetch(LOOPS_TRANSACTIONAL_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.LOOPS_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      transactionalId: env.LOOPS_TRIAL_ENDING_TRANSACTIONAL_ID,
-      email: payload.email,
-      dataVariables: payload.dataVariables,
-      // Loops takes idempotency in the body, not an Idempotency-Key header;
-      // this is what dedupes webhook retries into a single email.
-      idempotencyKey: event.id,
-    }),
+  await sendLoopsTransactional({
+    apiKey: env.LOOPS_API_KEY,
+    transactionalId: TRIAL_FINAL_REMINDER_TRANSACTIONAL_ID,
+    email: payload.email,
+    dataVariables: payload.dataVariables,
+    idempotencyKey: event.id,
   });
 
-  if (!response.ok) {
-    throw new Error(
-      `Loops transactional send failed (${response.status}): ${await response.text()}`,
-    );
-  }
-
   return {
-    transactionalId: env.LOOPS_TRIAL_ENDING_TRANSACTIONAL_ID,
+    transactionalId: TRIAL_FINAL_REMINDER_TRANSACTIONAL_ID,
     trialEnd: subscription.trial_end!,
     userId: getUserIdFromCustomer(customer),
   } satisfies TrialEndingEmailReceipt;

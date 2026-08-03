@@ -43,14 +43,32 @@ jobs:
               --output=json |
               python3 -c 'import json, sys; print(json.load(sys.stdin)[0]["secretValue"])'
           )"
+          loops_api_key="$(
+            infisical secrets get LOOPS_KEY \
+              --token="$INFISICAL_TOKEN" \
+              --env=prod \
+              --projectId="$project_id" \
+              --path=/anarlog/web \
+              --output=json |
+              python3 -c 'import json, sys; print(json.load(sys.stdin)[0]["secretValue"])'
+          )"
 
           echo "::add-mask::$posthog_api_key"
+          echo "::add-mask::$loops_api_key"
           if [[ "$posthog_api_key" != phc_* || ${#posthog_api_key} -lt 20 ]]; then
             echo "Invalid Anarlog PostHog project token" >&2
             exit 1
           fi
+          if [[ ${#loops_api_key} -lt 20 ]]; then
+            echo "Invalid Anarlog Loops API key" >&2
+            exit 1
+          fi
 
-          flyctl secrets set POSTHOG_API_KEY="$posthog_api_key" --stage --app hyprnote-stripe
+          flyctl secrets set \
+            POSTHOG_API_KEY="$posthog_api_key" \
+            LOOPS_API_KEY="$loops_api_key" \
+            --stage \
+            --app hyprnote-stripe
 
           flyctl deploy \
             --config apps/stripe/fly.toml \
@@ -67,6 +85,19 @@ jobs:
           )"
           if [[ "$actual_hash" != "$expected_hash" ]]; then
             echo "Deployed Stripe service has the wrong PostHog project token" >&2
+            exit 1
+          fi
+
+          expected_loops_hash="$(printf %s "$loops_api_key" | sha256sum | cut -d " " -f 1)"
+          actual_loops_hash="$(
+            flyctl ssh console \
+              --app hyprnote-stripe \
+              --command 'sh -lc '\''printf %s "$LOOPS_API_KEY" | sha256sum | cut -d " " -f 1'\''' |
+              grep -Eo '[0-9a-f]{64}' |
+              tail -n 1
+          )"
+          if [[ "$actual_loops_hash" != "$expected_loops_hash" ]]; then
+            echo "Deployed Stripe service has the wrong Loops API key" >&2
             exit 1
           fi
         env:

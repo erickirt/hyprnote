@@ -16,7 +16,7 @@ dockerfile = 'Dockerfile'
 strategy = 'bluegreen'
 
 [env]
-BUN_ENV = 'production'
+NODE_ENV = 'production'
 PORT = '8080'
 
 [processes]
