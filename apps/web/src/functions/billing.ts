@@ -124,6 +124,20 @@ const getBillingReturnUrl = (scheme?: z.infer<typeof desktopSchemeSchema>) => {
   return `${appOrigin}/app/account`;
 };
 
+export const portalIntentSchema = z.enum(["manage", "payment_method_update"]);
+
+// Cardless trials cancel unless a card is added, so add-card CTAs must land on
+// the card form. The portal home page leads with "Cancel subscription".
+const paymentMethodUpdateFlow = (
+  returnUrl: string,
+): Stripe.BillingPortal.SessionCreateParams.FlowData => ({
+  type: "payment_method_update",
+  after_completion: {
+    type: "redirect",
+    redirect: { return_url: returnUrl },
+  },
+});
+
 const getProPriceId = (period: "monthly" | "yearly") => {
   if (period === "yearly") {
     return requireEnv(env.STRIPE_YEARLY_PRICE_ID, "STRIPE_YEARLY_PRICE_ID");
@@ -422,11 +436,15 @@ export const createCheckoutSession = createServerFn({ method: "POST" })
           if (reservationId) {
             await releaseTrialReservation(user.id, reservationId);
           }
+          const returnUrl = data.scheme
+            ? getBillingReturnUrl(data.scheme)
+            : toAbsoluteInternalReturnUrl(getRequestAppOrigin(), returnTo);
           const portalSession = await stripe.billingPortal.sessions.create({
             customer: stripeCustomerId,
-            return_url: data.scheme
-              ? getBillingReturnUrl(data.scheme)
-              : toAbsoluteInternalReturnUrl(getRequestAppOrigin(), returnTo),
+            return_url: returnUrl,
+            ...(activeSubscription.status === "trialing"
+              ? { flow_data: paymentMethodUpdateFlow(returnUrl) }
+              : {}),
           });
           return { url: portalSession.url };
         }
@@ -533,9 +551,22 @@ export const createPlanSwitchSession = createServerFn({ method: "POST" })
       });
     }
 
-    const subscriptionItemId = activeSubscription.items.data[0].id;
-
+    const subscriptionItem = activeSubscription.items.data[0];
+    const targetPriceId = getProPriceId(data.targetPeriod);
     const returnUrl = getBillingReturnUrl(data.scheme);
+
+    // Stripe rejects a subscription_update_confirm flow that changes nothing.
+    // Legacy desktop builds link here with the default monthly period, so a
+    // monthly subscriber lands on a no-op switch.
+    if (subscriptionItem.price.id === targetPriceId) {
+      const portalSession = await stripe.billingPortal.sessions.create({
+        customer: stripeCustomerId,
+        return_url: returnUrl,
+      });
+
+      return { url: portalSession.url };
+    }
+
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: stripeCustomerId,
       return_url: returnUrl,
@@ -545,8 +576,8 @@ export const createPlanSwitchSession = createServerFn({ method: "POST" })
           subscription: activeSubscription.id,
           items: [
             {
-              id: subscriptionItemId,
-              price: getProPriceId(data.targetPeriod),
+              id: subscriptionItem.id,
+              price: targetPriceId,
             },
           ],
         },
@@ -562,6 +593,7 @@ export const createPlanSwitchSession = createServerFn({ method: "POST" })
 
 const createPortalSessionInput = z.object({
   scheme: desktopSchemeSchema.optional(),
+  intent: portalIntentSchema.default("manage"),
 });
 
 export const createPortalSession = createServerFn({ method: "POST" })
@@ -587,9 +619,13 @@ export const createPortalSession = createServerFn({ method: "POST" })
       throw new Error("No Stripe customer found");
     }
 
+    const returnUrl = getBillingReturnUrl(data.scheme);
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: stripeCustomerId,
-      return_url: getBillingReturnUrl(data.scheme),
+      return_url: returnUrl,
+      ...(data.intent === "payment_method_update"
+        ? { flow_data: paymentMethodUpdateFlow(returnUrl) }
+        : {}),
     });
 
     return { url: portalSession.url };
