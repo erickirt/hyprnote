@@ -3,6 +3,7 @@ import { ArrowRight } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 
 import { SiteFooter } from "@/components/site-footer";
+import { getResizedImageSrcSet, getResizedImageUrl } from "@/lib/image-cdn";
 import { MANIFESTO_SIGNERS } from "@/lib/team";
 
 import { HeroSection } from "./hero-section";
@@ -44,7 +45,7 @@ export function HomePage({
               className="mx-auto max-w-3xl overflow-hidden rounded-[3px] border border-[#eadfce] bg-[#fffaf0] px-7 py-9 text-left shadow-[0_18px_50px_rgba(68,54,36,0.12)] sm:px-10 sm:py-12"
               style={{
                 backgroundImage:
-                  "linear-gradient(115deg, rgba(255, 250, 240, 0.9), rgba(246, 236, 218, 0.82)), url('/textures/crumpled-paper.png')",
+                  "linear-gradient(115deg, rgba(255, 250, 240, 0.9), rgba(246, 236, 218, 0.82)), url('/textures/crumpled-paper.webp')",
                 backgroundPosition: "center",
                 backgroundSize: "cover",
               }}
@@ -70,7 +71,11 @@ export function HomePage({
                           className="block rounded-full transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#181613]"
                         >
                           <img
-                            src={member.avatar}
+                            src={getResizedImageUrl(member.avatar, {
+                              width: 30,
+                              height: 30,
+                            })}
+                            srcSet={getResizedImageSrcSet(member.avatar, 30)}
                             alt=""
                             width={30}
                             height={30}
@@ -87,7 +92,11 @@ export function HomePage({
                           role="img"
                         >
                           <img
-                            src={member.avatar}
+                            src={getResizedImageUrl(member.avatar, {
+                              width: 30,
+                              height: 30,
+                            })}
+                            srcSet={getResizedImageSrcSet(member.avatar, 30)}
                             alt=""
                             width={30}
                             height={30}
