@@ -4,7 +4,6 @@ import {
   ArrowSquareOut,
   CircleNotch,
   Copy,
-  LockKey,
   Warning,
 } from "@phosphor-icons/react";
 import { useMutation } from "@tanstack/react-query";
@@ -31,18 +30,27 @@ import {
 } from "./attachments";
 import { setSessionShareScope, ShareManagementError } from "./client";
 import {
+  generalAccessWorkspaceId,
+  GeneralAccessSelector,
+  type GeneralAccessTarget,
+  type GeneralAccessValue,
+} from "./general-access";
+import {
   isInviteEmail,
   useSessionInvitationManagement,
 } from "./invitation-management";
 import {
-  copyText,
-  getSessionShareDesktopScheme,
+  copyPublicSessionShareUrl,
+  copySessionShareUrl,
+  enableAndCopySessionShareLink,
   ShareOperationAbortedError,
   type SharePanelData,
   type SharePanelIdentity,
+  withoutSignal,
 } from "./management";
 import { useShareOperationLifecycle } from "./management-operation";
 import { createPublishLatestSessionShare } from "./management-publish";
+import type { AvailableShareWorkspace } from "./source";
 import { useSessionShareSyncStatus } from "./sync-state";
 import { buildAccountSessionShareUrl } from "./urls";
 
@@ -60,27 +68,29 @@ export function SessionSharePopoverContent({
   sessionId,
   identity,
   data,
-  loading,
   error,
   canExpand,
   sharedAttachments,
   sharedSnapshot,
   sharedAttachmentsReady,
+  workspaces,
   pendingRef,
   onRetry,
+  onActivated,
   onChanged,
 }: {
   sessionId: string;
   identity: SharePanelIdentity;
   data: SharePanelData | undefined;
-  loading: boolean;
   error: boolean;
   canExpand: boolean;
   sharedAttachments: SharedNoteAttachment[];
   sharedSnapshot: SharedNoteSnapshot | null;
   sharedAttachmentsReady: boolean;
+  workspaces: AvailableShareWorkspace[];
   pendingRef: MutableRefObject<boolean>;
   onRetry: () => void;
+  onActivated: () => Promise<unknown>;
   onChanged: () => Promise<unknown>;
 }) {
   const auth = useAuth();
@@ -94,7 +104,7 @@ export function SessionSharePopoverContent({
     sessionId,
   );
   const hasConflict = syncStatus === "conflict";
-  const canPublish = canExpand && !hasConflict;
+  const canPublish = canExpand && !hasConflict && Boolean(management);
   const { data: sessionAttachments = [] } =
     useSessionShareAttachments(sessionId);
   const sharedAttachmentIds = matchSharedAttachmentsToLocal(
@@ -130,6 +140,7 @@ export function SessionSharePopoverContent({
     runOperation,
     publishLatest,
     requireActiveContext,
+    onActivated,
     onChanged,
   });
 
@@ -192,19 +203,59 @@ export function SessionSharePopoverContent({
 
   // Optimistic General-access value: shown from click until the refreshed
   // management state confirms it, so the select never flashes the old scope.
-  const [optimisticScope, setOptimisticScope] = useState<string | null>(null);
+  const [optimisticScope, setOptimisticScope] =
+    useState<GeneralAccessValue | null>(null);
   const scopeMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (target: GeneralAccessTarget) =>
       runOperation(async (signal) => {
         if (!management) throw new ShareManagementError();
-        const context = requireActiveContext(signal);
-        await setSessionShareScope(context, {
-          shareId: identity.shareId,
-          scope: "restricted",
-        });
+        let context = requireActiveContext(signal);
+        if (target === "restricted") {
+          await setSessionShareScope(context, {
+            shareId: identity.shareId,
+            scope: "restricted",
+          });
+          await onActivated();
+          return { copied: false };
+        }
+        if (!canExpand) throw new ShareManagementError();
+        await publishLatest(signal);
+        context = requireActiveContext(signal);
+        if (target === "link") {
+          await enableAndCopySessionShareLink({
+            context,
+            shareId: identity.shareId,
+            hasActiveLink: management.hasActiveLink,
+            assertActive: () => requireActiveContext(signal),
+          });
+          await onActivated();
+          return { copied: true };
+        }
+        const workspaceId = generalAccessWorkspaceId(target, workspaces);
+        if (!workspaceId) throw new ShareManagementError();
+        try {
+          await setSessionShareScope(context, {
+            shareId: identity.shareId,
+            scope: "workspace",
+            workspaceId,
+          });
+          requireActiveContext(signal);
+        } catch {
+          await setSessionShareScope(withoutSignal(context), {
+            shareId: identity.shareId,
+            scope: "restricted",
+          }).catch(() => undefined);
+          throw new ShareManagementError();
+        }
+        await onActivated();
+        return { copied: false };
       }),
-    onSuccess: () => {
-      sonnerToast.success("Access updated.");
+    onSuccess: ({ copied }) => {
+      sonnerToast.success(
+        copied
+          ? "Anyone with the link can view. Link copied."
+          : "Access updated.",
+      );
     },
     onError: (error) => {
       setOptimisticScope(null);
@@ -232,17 +283,16 @@ export function SessionSharePopoverContent({
     mutationFn: () =>
       runOperation(async (signal) => {
         if (!management) throw new ShareManagementError();
-        requireActiveContext(signal);
-        const desktopScheme = await getSessionShareDesktopScheme();
-        requireActiveContext(signal);
-        const url = buildAccountSessionShareUrl({
-          appBaseUrl: env.VITE_APP_URL,
-          shareId: identity.shareId,
-          desktopScheme,
-        });
-        requireActiveContext(signal);
-        await copyText(url);
-        requireActiveContext(signal);
+        if (management.generalScope === "public") {
+          await copyPublicSessionShareUrl(management.publicSlug, () =>
+            requireActiveContext(signal),
+          );
+        } else {
+          await copySessionShareUrl(identity.shareId, () =>
+            requireActiveContext(signal),
+          );
+        }
+        await onActivated();
       }),
     onSuccess: () => {
       trackAnalyticsEvent("share_link_copied", {
@@ -266,7 +316,7 @@ export function SessionSharePopoverContent({
     keepDesktopMutation.isPending ||
     openWebCopyMutation.isPending;
   pendingRef.current = anyPending;
-  const generalScopeValue = management
+  const generalScopeValue: GeneralAccessValue = management
     ? management.generalScope === "workspace"
       ? `workspace:${management.generalWorkspaceId}`
       : management.generalScope
@@ -308,9 +358,9 @@ export function SessionSharePopoverContent({
       sideOffset={8}
       aria-labelledby="session-share-heading"
       aria-describedby="session-share-description"
-      className="h-[240px] max-h-[calc(100vh-64px)] w-[320px] max-w-[calc(100vw-16px)] overflow-hidden"
+      className="grid max-h-[min(540px,calc(100vh-64px))] min-h-[340px] w-[440px] max-w-[calc(100vw-16px)] overflow-hidden"
     >
-      <AppFloatingPanel className="flex h-full flex-col overflow-hidden">
+      <AppFloatingPanel className="flex min-h-0 flex-col overflow-hidden">
         <div ref={operationLifecycleRef} className="contents">
           <header className="border-border/60 border-b px-3 py-2 text-left">
             <h2
@@ -325,322 +375,281 @@ export function SessionSharePopoverContent({
           </header>
 
           <div className="scrollbar-soft min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2">
-            {loading && !data ? (
-              <div className="text-muted-foreground flex min-h-full items-center justify-center gap-2 text-xs">
-                <CircleNotch
-                  className="size-4 animate-spin"
-                  aria-hidden="true"
-                />
-                <Trans>Loading access…</Trans>
-              </div>
-            ) : error || !data || !management ? (
-              <div className="flex min-h-full flex-col items-center justify-center gap-3 text-center">
-                <p className="text-muted-foreground text-xs">
-                  <Trans>Access settings could not be loaded.</Trans>
-                </p>
-                <Button size="sm" variant="outline" onClick={onRetry}>
-                  <ArrowsClockwise className="size-3.5" aria-hidden="true" />
-                  <Trans>Try again</Trans>
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {hasConflict ? (
-                  <section
-                    aria-labelledby="sharing-conflict-heading"
-                    className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2"
-                  >
-                    <div className="flex items-start gap-2.5">
-                      <Warning
-                        className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400"
-                        aria-hidden="true"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <h3
-                          id="sharing-conflict-heading"
-                          className="text-xs font-medium"
-                        >
-                          <Trans>Sharing paused to protect your edits</Trans>
-                        </h3>
-                        <p className="text-muted-foreground mt-0.5 text-[11px] leading-4">
-                          <Trans>
-                            Resolve the web and desktop edits before inviting
-                            anyone.
-                          </Trans>
-                        </p>
-                        <div className="mt-2.5 flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            disabled={openWebCopyMutation.isPending}
-                            onClick={() => openWebCopyMutation.mutate()}
-                          >
-                            {openWebCopyMutation.isPending ? (
-                              <CircleNotch
-                                className="size-3.5 animate-spin"
-                                aria-hidden="true"
-                              />
-                            ) : (
-                              <ArrowSquareOut
-                                className="size-3.5"
-                                aria-hidden="true"
-                              />
-                            )}
-                            <Trans>Open web copy</Trans>
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            disabled={
-                              !canExpand || keepDesktopMutation.isPending
-                            }
-                            onClick={() => keepDesktopMutation.mutate()}
-                          >
-                            {keepDesktopMutation.isPending ? (
-                              <CircleNotch
-                                className="size-3.5 animate-spin"
-                                aria-hidden="true"
-                              />
-                            ) : null}
-                            <Trans>Keep desktop edits</Trans>
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-                ) : null}
-
-                <section aria-labelledby="invite-people-heading">
-                  <h3 id="invite-people-heading" className="sr-only">
-                    <Trans>People with access</Trans>
-                  </h3>
-                  <form
-                    className="flex items-center gap-2"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      void inviteForm.handleSubmit();
-                    }}
-                  >
-                    <inviteForm.Field name="email">
-                      {(field) => (
-                        <Input
-                          type="text"
-                          aria-label="Invitee email"
-                          autoComplete="email"
-                          required
-                          value={field.state.value}
-                          disabled={!canPublish || inviteMutation.isPending}
-                          onBlur={field.handleBlur}
-                          onChange={(event) =>
-                            field.handleChange(event.target.value)
-                          }
-                          placeholder="Email or name"
-                          className="h-8 min-w-0 flex-1 rounded-md text-xs"
-                        />
-                      )}
-                    </inviteForm.Field>
-                    <inviteForm.Subscribe
-                      selector={(state) => state.values.email}
-                    >
-                      {(email) => (
+            <div className="space-y-2">
+              {error && !data ? (
+                <div className="border-destructive/30 bg-destructive/5 flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2">
+                  <p className="text-muted-foreground text-xs">
+                    <Trans>Access settings could not be loaded.</Trans>
+                  </p>
+                  <Button size="sm" variant="outline" onClick={onRetry}>
+                    <ArrowsClockwise className="size-3.5" aria-hidden="true" />
+                    <Trans>Try again</Trans>
+                  </Button>
+                </div>
+              ) : null}
+              {hasConflict ? (
+                <section
+                  aria-labelledby="sharing-conflict-heading"
+                  className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <Warning
+                      className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400"
+                      aria-hidden="true"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <h3
+                        id="sharing-conflict-heading"
+                        className="text-xs font-medium"
+                      >
+                        <Trans>Sharing paused to protect your edits</Trans>
+                      </h3>
+                      <p className="text-muted-foreground mt-0.5 text-[11px] leading-4">
+                        <Trans>
+                          Resolve the web and desktop edits before inviting
+                          anyone.
+                        </Trans>
+                      </p>
+                      <div className="mt-2.5 flex flex-wrap gap-2">
                         <Button
-                          type="submit"
+                          type="button"
                           size="sm"
-                          disabled={
-                            !canPublish ||
-                            !isInviteEmail(email) ||
-                            inviteMutation.isPending
-                          }
-                          className="h-8 shrink-0 rounded-md px-3"
+                          variant="outline"
+                          disabled={openWebCopyMutation.isPending}
+                          onClick={() => openWebCopyMutation.mutate()}
                         >
-                          {inviteMutation.isPending ? (
+                          {openWebCopyMutation.isPending ? (
+                            <CircleNotch
+                              className="size-3.5 animate-spin"
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <ArrowSquareOut
+                              className="size-3.5"
+                              aria-hidden="true"
+                            />
+                          )}
+                          <Trans>Open web copy</Trans>
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={!canExpand || keepDesktopMutation.isPending}
+                          onClick={() => keepDesktopMutation.mutate()}
+                        >
+                          {keepDesktopMutation.isPending ? (
                             <CircleNotch
                               className="size-3.5 animate-spin"
                               aria-hidden="true"
                             />
                           ) : null}
-                          <Trans>Invite</Trans>
+                          <Trans>Keep desktop edits</Trans>
                         </Button>
-                      )}
-                    </inviteForm.Subscribe>
-                  </form>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              ) : null}
 
+              <section aria-labelledby="invite-people-heading">
+                <h3 id="invite-people-heading" className="sr-only">
+                  <Trans>People with access</Trans>
+                </h3>
+                <form
+                  className="flex items-center gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void inviteForm.handleSubmit();
+                  }}
+                >
+                  <inviteForm.Field name="email">
+                    {(field) => (
+                      <Input
+                        type="text"
+                        aria-label="Invitee email"
+                        autoComplete="email"
+                        required
+                        value={field.state.value}
+                        disabled={!canPublish || inviteMutation.isPending}
+                        onBlur={field.handleBlur}
+                        onChange={(event) =>
+                          field.handleChange(event.target.value)
+                        }
+                        placeholder="Email or name"
+                        className="h-8 min-w-0 flex-1 rounded-md text-xs"
+                      />
+                    )}
+                  </inviteForm.Field>
                   <inviteForm.Subscribe
                     selector={(state) => state.values.email}
                   >
-                    {(query) => {
-                      const suggestions = suggestedContacts(query);
-                      return suggestions.length ? (
-                        <div className="mt-1 space-y-0.5 rounded-lg border p-1">
-                          {suggestions.map((contact) => {
-                            return (
-                              <button
-                                key={contact.id}
-                                type="button"
-                                className="hover:bg-accent flex w-full items-center gap-2 rounded-md px-2 py-1 text-left"
-                                onClick={() =>
-                                  inviteForm.setFieldValue(
-                                    "email",
-                                    contact.email,
-                                  )
-                                }
-                              >
-                                <ContactFacehash
-                                  name={contact.name || contact.email}
-                                  size={22}
-                                />
-                                <span className="min-w-0 flex-1">
-                                  <span className="block truncate text-xs font-medium">
-                                    {contact.name || contact.email}
-                                  </span>
-                                  {contact.name ? (
-                                    <span className="text-muted-foreground block truncate text-[10px]">
-                                      {contact.email}
-                                    </span>
-                                  ) : null}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : null;
-                    }}
-                  </inviteForm.Subscribe>
-
-                  <div className="mt-2 space-y-0.5">
-                    <div className="flex min-h-9 items-center gap-2 rounded-lg px-1.5 py-1">
-                      <ContactFacehash name={ownerName} size={24} />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-medium">
-                          {ownerName}{" "}
-                          <span className="text-muted-foreground">(You)</span>
-                        </p>
-                        {ownerEmail ? (
-                          <p className="text-muted-foreground truncate text-[10px]">
-                            {ownerEmail}
-                          </p>
-                        ) : null}
-                      </div>
-                      <span className="text-muted-foreground shrink-0 text-[11px]">
-                        <Trans>Full access</Trans>
-                      </span>
-                    </div>
-
-                    {data.access.length
-                      ? data.access.map((entry) => (
-                          <AccessEntryRow
-                            key={`${entry.entryType}:${entry.entryId}`}
-                            entry={entry}
-                            pending={
-                              entryMutation.isPending &&
-                              entryMutation.variables?.entry.entryId ===
-                                entry.entryId
-                            }
-                            canExpand={canExpand}
-                            contactName={
-                              humans.find(
-                                (human) =>
-                                  human.email.toLowerCase() ===
-                                  entry.userEmail?.toLowerCase(),
-                              )?.name
-                            }
-                            onMutate={entryMutation.mutate}
-                          />
-                        ))
-                      : null}
-                  </div>
-                </section>
-
-                {sessionAttachments.length ? (
-                  <SessionAttachmentControls
-                    attachments={sessionAttachments}
-                    sharedAttachmentIds={sharedAttachmentIds}
-                    canUseCloud={canPublish}
-                    canInclude={
-                      canPublish &&
-                      sharedAttachmentsReady &&
-                      Boolean(env.VITE_SUPABASE_URL)
-                    }
-                    cloudPendingAttachmentId={
-                      attachmentMutation.isPending &&
-                      attachmentMutation.variables?.type === "cloud"
-                        ? (attachmentMutation.variables.attachment.id ?? null)
-                        : null
-                    }
-                    sharePendingAttachmentId={
-                      attachmentMutation.isPending &&
-                      attachmentMutation.variables?.type === "share"
-                        ? (attachmentMutation.variables?.attachment.id ?? null)
-                        : null
-                    }
-                    onCloudChange={(attachment, enabled) =>
-                      attachmentMutation.mutate({
-                        type: "cloud",
-                        attachment,
-                        enabled,
-                      })
-                    }
-                    onShareChange={(attachment, included) =>
-                      attachmentMutation.mutate({
-                        type: "share",
-                        attachment,
-                        included,
-                      })
-                    }
-                  />
-                ) : null}
-
-                <section
-                  aria-labelledby="general-access-heading"
-                  className="border-border/60 border-t pt-2"
-                >
-                  <h3
-                    id="general-access-heading"
-                    className="text-muted-foreground mb-1 text-[10px] font-medium"
-                  >
-                    <Trans>General access</Trans>
-                  </h3>
-                  <div className="flex items-center gap-2 rounded-lg px-1.5 py-1">
-                    <span className="bg-muted flex size-7 shrink-0 items-center justify-center rounded-md">
-                      <LockKey className="size-3.5" aria-hidden="true" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-medium">
-                        <Trans>Only people invited</Trans>
-                      </p>
-                      {shownScopeValue !== "restricted" ? (
-                        <p className="text-muted-foreground truncate text-[10px]">
-                          <Trans>Previous broad access is still active</Trans>
-                        </p>
-                      ) : null}
-                    </div>
-                    {shownScopeValue !== "restricted" ? (
+                    {(email) => (
                       <Button
-                        type="button"
+                        type="submit"
                         size="sm"
-                        variant="ghost"
-                        disabled={scopeMutation.isPending}
-                        onClick={() => {
-                          setOptimisticScope("restricted");
-                          scopeMutation.mutate();
-                        }}
-                        className="h-7 shrink-0 px-2 text-[11px]"
+                        disabled={
+                          !canPublish ||
+                          !isInviteEmail(email) ||
+                          inviteMutation.isPending
+                        }
+                        className="h-8 shrink-0 rounded-md px-3"
                       >
-                        {scopeMutation.isPending ? (
+                        {inviteMutation.isPending ? (
                           <CircleNotch
                             className="size-3.5 animate-spin"
                             aria-hidden="true"
                           />
                         ) : null}
-                        <Trans>Restrict</Trans>
+                        <Trans>Invite</Trans>
                       </Button>
-                    ) : null}
+                    )}
+                  </inviteForm.Subscribe>
+                </form>
+
+                <inviteForm.Subscribe selector={(state) => state.values.email}>
+                  {(query) => {
+                    const suggestions = suggestedContacts(query);
+                    return suggestions.length ? (
+                      <div className="mt-1 space-y-0.5 rounded-lg border p-1">
+                        {suggestions.map((contact) => {
+                          return (
+                            <button
+                              key={contact.id}
+                              type="button"
+                              className="hover:bg-accent flex w-full items-center gap-2 rounded-md px-2 py-1 text-left"
+                              onClick={() =>
+                                inviteForm.setFieldValue("email", contact.email)
+                              }
+                            >
+                              <ContactFacehash
+                                name={contact.name || contact.email}
+                                size={22}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-xs font-medium">
+                                  {contact.name || contact.email}
+                                </span>
+                                {contact.name ? (
+                                  <span className="text-muted-foreground block truncate text-[10px]">
+                                    {contact.email}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null;
+                  }}
+                </inviteForm.Subscribe>
+
+                <div className="mt-2 space-y-0.5">
+                  <div className="flex min-h-9 items-center gap-2 rounded-lg px-1.5 py-1">
+                    <ContactFacehash name={ownerName} size={24} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium">
+                        {ownerName}{" "}
+                        <span className="text-muted-foreground">(You)</span>
+                      </p>
+                      {ownerEmail ? (
+                        <p className="text-muted-foreground truncate text-[10px]">
+                          {ownerEmail}
+                        </p>
+                      ) : null}
+                    </div>
+                    <span className="text-muted-foreground shrink-0 text-[11px]">
+                      <Trans>Full access</Trans>
+                    </span>
                   </div>
-                </section>
-              </div>
-            )}
+
+                  {data?.access.length
+                    ? data.access.map((entry) => (
+                        <AccessEntryRow
+                          key={`${entry.entryType}:${entry.entryId}`}
+                          entry={entry}
+                          pending={
+                            entryMutation.isPending &&
+                            entryMutation.variables?.entry.entryId ===
+                              entry.entryId
+                          }
+                          canExpand={canExpand}
+                          contactName={
+                            humans.find(
+                              (human) =>
+                                human.email.toLowerCase() ===
+                                entry.userEmail?.toLowerCase(),
+                            )?.name
+                          }
+                          onMutate={entryMutation.mutate}
+                        />
+                      ))
+                    : null}
+                </div>
+              </section>
+
+              {sessionAttachments.length ? (
+                <SessionAttachmentControls
+                  attachments={sessionAttachments}
+                  sharedAttachmentIds={sharedAttachmentIds}
+                  canUseCloud={canPublish}
+                  canInclude={
+                    canPublish &&
+                    sharedAttachmentsReady &&
+                    Boolean(env.VITE_SUPABASE_URL)
+                  }
+                  cloudPendingAttachmentId={
+                    attachmentMutation.isPending &&
+                    attachmentMutation.variables?.type === "cloud"
+                      ? (attachmentMutation.variables.attachment.id ?? null)
+                      : null
+                  }
+                  sharePendingAttachmentId={
+                    attachmentMutation.isPending &&
+                    attachmentMutation.variables?.type === "share"
+                      ? (attachmentMutation.variables?.attachment.id ?? null)
+                      : null
+                  }
+                  onCloudChange={(attachment, enabled) =>
+                    attachmentMutation.mutate({
+                      type: "cloud",
+                      attachment,
+                      enabled,
+                    })
+                  }
+                  onShareChange={(attachment, included) =>
+                    attachmentMutation.mutate({
+                      type: "share",
+                      attachment,
+                      included,
+                    })
+                  }
+                />
+              ) : null}
+
+              <section
+                aria-labelledby="general-access-heading"
+                className="border-border/60 border-t pt-2"
+              >
+                <h3
+                  id="general-access-heading"
+                  className="text-muted-foreground mb-1 text-[10px] font-medium"
+                >
+                  <Trans>General access</Trans>
+                </h3>
+                <GeneralAccessSelector
+                  value={shownScopeValue}
+                  workspaces={workspaces}
+                  disabled={!management}
+                  canExpand={canPublish}
+                  pending={scopeMutation.isPending}
+                  onValueChange={(target) => {
+                    setOptimisticScope(target);
+                    scopeMutation.mutate(target);
+                  }}
+                />
+              </section>
+            </div>
           </div>
 
           <footer className="border-border/60 flex items-center justify-between border-t px-3 py-2">
@@ -667,11 +676,21 @@ export function SessionSharePopoverContent({
               type="button"
               size="sm"
               variant="outline"
-              disabled={generalCopyMutation.isPending || !management}
-              onClick={() => generalCopyMutation.mutate()}
+              disabled={
+                generalCopyMutation.isPending ||
+                scopeMutation.isPending ||
+                !management
+              }
+              onClick={() => {
+                if (shownScopeValue === "link") {
+                  scopeMutation.mutate("link");
+                } else {
+                  generalCopyMutation.mutate();
+                }
+              }}
               className="h-7 rounded-md px-2.5 text-xs"
             >
-              {generalCopyMutation.isPending ? (
+              {generalCopyMutation.isPending || scopeMutation.isPending ? (
                 <CircleNotch
                   className="size-3.5 animate-spin"
                   aria-hidden="true"
@@ -679,7 +698,11 @@ export function SessionSharePopoverContent({
               ) : (
                 <Copy className="size-3.5" aria-hidden="true" />
               )}
-              <Trans>Copy link</Trans>
+              {shownScopeValue === "link" ? (
+                <Trans>Replace link &amp; copy</Trans>
+              ) : (
+                <Trans>Copy link</Trans>
+              )}
             </Button>
           </footer>
         </div>
