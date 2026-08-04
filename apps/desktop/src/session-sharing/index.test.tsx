@@ -64,6 +64,7 @@ const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
   contacts: [] as any[],
+  participants: [] as any[],
   workspaces: [] as { id: string; name: string }[],
 }));
 
@@ -81,6 +82,10 @@ vi.mock("~/contacts/queries", () => ({
 
 vi.mock("~/contacts/shared", () => ({
   ContactFacehash: ({ name }: { name: string }) => <span>{name[0]}</span>,
+}));
+
+vi.mock("~/session/queries", () => ({
+  useSessionParticipants: () => mocks.participants,
 }));
 
 vi.mock("@anlg/plugin-opener2", () => ({
@@ -367,6 +372,7 @@ describe("SessionShareButton", () => {
     mocks.events = [];
     mocks.access = [];
     mocks.contacts = [];
+    mocks.participants = [];
     mocks.workspaces = [];
     mocks.auth.session = createSession();
     mocks.auth.supabase = {};
@@ -1521,6 +1527,230 @@ describe("SessionShareButton", () => {
       "session-1",
     );
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Invitation sent.");
+  });
+
+  it("keeps failed invitation recipients in the draft", async () => {
+    mocks.managedNote = null;
+    mocks.loadManagedSharedNoteForSession.mockResolvedValue(null);
+    mocks.createSessionAccessInvitation.mockRejectedValueOnce(
+      new Error("unavailable"),
+    );
+    renderShareButton();
+    await openSharePopover();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Invitee email" }), {
+      target: { value: "person@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Could not create this invitation.",
+      ),
+    );
+    expect(mocks.markSessionShareActivated).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Remove person@example.com" }),
+    ).not.toBeNull();
+  });
+
+  it("invites every session participant seeded into the field", async () => {
+    mocks.managedNote = null;
+    mocks.loadManagedSharedNoteForSession.mockResolvedValue(null);
+    mocks.participants = [
+      { id: "p1", source: "auto", name: "Sungbin Jo", email: "sungbin@e.com" },
+      { id: "p2", source: "auto", name: "", email: "yujong@e.com" },
+      { id: "p3", source: "auto", name: "Artem", email: "" },
+      { id: "p4", source: "excluded", name: "Dropped", email: "drop@e.com" },
+      { id: "p5", source: "auto", name: "Me", email: "owner@example.com" },
+    ];
+    mocks.auth.session = {
+      ...createSession(),
+      user: { id: USER_ID, is_anonymous: false, email: "owner@example.com" },
+    };
+    renderShareButton();
+    await openSharePopover();
+    mocks.sendSessionAccessInvitationEmail.mockClear();
+
+    expect(screen.getByText("Sungbin Jo")).not.toBeNull();
+    expect(screen.getByText("yujong@e.com")).not.toBeNull();
+    expect(screen.queryByText("Artem")).toBeNull();
+    expect(screen.queryByText("Dropped")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+
+    await waitFor(() =>
+      expect(mocks.sendSessionAccessInvitationEmail).toHaveBeenCalledTimes(2),
+    );
+    expect(
+      mocks.createSessionAccessInvitation.mock.calls.map(
+        (call) => call[1].inviteeEmail,
+      ),
+    ).toEqual(["sungbin@e.com", "yujong@e.com"]);
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Invitations sent.");
+  });
+
+  it("clears successfully invited participants from the field", async () => {
+    mocks.participants = [
+      { id: "p1", source: "auto", name: "Sungbin Jo", email: "sungbin@e.com" },
+    ];
+    renderShareButton();
+    await openSharePopover();
+
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Remove Sungbin Jo" }),
+      ).toBeNull(),
+    );
+    expect(
+      (screen.getByRole("button", { name: "Invite" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it("re-seeds an invited participant after access is revoked", async () => {
+    mocks.participants = [
+      { id: "p1", source: "auto", name: "Sungbin Jo", email: "sungbin@e.com" },
+    ];
+    mocks.createSessionAccessInvitation.mockImplementationOnce(async () => {
+      mocks.access = [
+        {
+          entryType: "invitation",
+          entryId: INVITATION_ID,
+          userId: null,
+          userEmail: "sungbin@e.com",
+          capability: "viewer",
+          status: "pending",
+          createdAt: "2026-08-04T00:00:00Z",
+          expiresAt: "2026-08-17T00:00:00Z",
+        },
+      ];
+      return {
+        invitationId: INVITATION_ID,
+        inviteToken: TOKEN,
+        invitationExpiresAt: "2026-08-17T00:00:00Z",
+        wasCreated: true,
+      };
+    });
+    mocks.revokeSessionAccessInvitation.mockImplementationOnce(async () => {
+      mocks.access = [];
+      return {
+        invitationId: INVITATION_ID,
+        revokedAt: "2026-08-04T00:00:00Z",
+      };
+    });
+    renderShareButton();
+    await openSharePopover();
+
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+    await screen.findByText("Invitation pending");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Remove Sungbin Jo" }),
+    ).not.toBeNull();
+  });
+
+  it("drops a removed participant from the invitation", async () => {
+    mocks.managedNote = null;
+    mocks.loadManagedSharedNoteForSession.mockResolvedValue(null);
+    mocks.participants = [
+      { id: "p1", source: "auto", name: "Sungbin Jo", email: "sungbin@e.com" },
+      { id: "p2", source: "auto", name: "Yujong Lee", email: "yujong@e.com" },
+    ];
+    renderShareButton();
+    await openSharePopover();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Yujong Lee" }));
+    expect(screen.queryByText("Yujong Lee")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+
+    await waitFor(() =>
+      expect(mocks.createSessionAccessInvitation).toHaveBeenCalledOnce(),
+    );
+    expect(
+      mocks.createSessionAccessInvitation.mock.calls[0]![1].inviteeEmail,
+    ).toBe("sungbin@e.com");
+  });
+
+  it("skips participants that already have access", async () => {
+    mocks.participants = [
+      { id: "p1", source: "auto", name: "Sungbin Jo", email: "sungbin@e.com" },
+      { id: "p2", source: "auto", name: "Yujong Lee", email: "yujong@e.com" },
+    ];
+    mocks.access = [
+      {
+        entryType: "invitation",
+        entryId: INVITATION_ID,
+        userId: null,
+        userEmail: "Sungbin@e.com",
+        capability: "viewer",
+        status: "pending",
+        createdAt: "2026-07-17T00:00:00Z",
+        expiresAt: "2026-08-17T00:00:00Z",
+      },
+    ];
+    renderShareButton();
+    await openSharePopover();
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Remove Yujong Lee" }),
+      ).not.toBeNull(),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Remove Sungbin Jo" }),
+    ).toBeNull();
+  });
+
+  it("reports invitations that could not be created", async () => {
+    mocks.participants = [
+      { id: "p1", source: "auto", name: "Sungbin Jo", email: "sungbin@e.com" },
+      { id: "p2", source: "auto", name: "Yujong Lee", email: "yujong@e.com" },
+    ];
+    mocks.createSessionAccessInvitation.mockImplementationOnce(async () => {
+      throw new Error("nope");
+    });
+    renderShareButton();
+    await openSharePopover();
+
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Invited 1. Could not invite 1. Try again.",
+      ),
+    );
+  });
+
+  it("does not overwrite clipboard fallback links for multiple invitations", async () => {
+    mocks.participants = [
+      { id: "p1", source: "auto", name: "Sungbin Jo", email: "sungbin@e.com" },
+      { id: "p2", source: "auto", name: "Yujong Lee", email: "yujong@e.com" },
+    ];
+    mocks.sendSessionAccessInvitationEmail.mockRejectedValue(
+      new Error("mail unavailable"),
+    );
+    mocks.revokeSessionAccessInvitation.mockResolvedValue({
+      invitationId: INVITATION_ID,
+      revokedAt: "2026-08-04T00:00:00Z",
+    });
+    renderShareButton();
+    await openSharePopover();
+
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Could not create these invitations.",
+      ),
+    );
+    expect(mocks.clipboardWriteText).not.toHaveBeenCalled();
+    expect(mocks.revokeSessionAccessInvitation).toHaveBeenCalledTimes(2);
   });
 
   it("keeps an emailed invitation when the popover closes", async () => {
