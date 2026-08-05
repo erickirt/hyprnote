@@ -155,98 +155,100 @@ impl Actor for SessionActor {
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         let span = session_span(&state.ctx.params.session_id);
-        let _guard = span.enter();
+        async {
+            state.source_restarts.maybe_reset(&RESTART_BUDGET);
+            state.recorder_restarts.maybe_reset(&RESTART_BUDGET);
 
-        state.source_restarts.maybe_reset(&RESTART_BUDGET);
-        state.recorder_restarts.maybe_reset(&RESTART_BUDGET);
+            if state.shutting_down {
+                return Ok(());
+            }
 
-        if state.shutting_down {
-            return Ok(());
-        }
+            match message {
+                SupervisionEvent::ActorStarted(_) | SupervisionEvent::ProcessGroupChanged(_) => {}
 
-        match message {
-            SupervisionEvent::ActorStarted(_) | SupervisionEvent::ProcessGroupChanged(_) => {}
-
-            SupervisionEvent::ActorTerminated(cell, _, reason) => {
-                match children::identify_child(state, &cell) {
-                    Some(ChildKind::Listener) => {
-                        tracing::info!(?reason, "listener_terminated");
-                        state.listener_cell = None;
-                        handle_listener_failure(
-                            &myself,
-                            state,
-                            mode::parse_degraded_reason(reason.as_ref()),
-                        )
-                        .await;
-                    }
-                    Some(ChildKind::Source) => {
-                        tracing::info!(?reason, "source_terminated_attempting_restart");
-                        state.source_cell = None;
-                        let is_device_change = reason.as_deref() == Some("device_change");
-                        if !children::try_restart_source(
-                            myself.get_cell(),
-                            state,
-                            !is_device_change,
-                        )
-                        .await
-                        {
-                            tracing::error!("source_restart_limit_exceeded_meltdown");
-                            meltdown(myself, state).await;
+                SupervisionEvent::ActorTerminated(cell, _, reason) => {
+                    match children::identify_child(state, &cell) {
+                        Some(ChildKind::Listener) => {
+                            tracing::info!(?reason, "listener_terminated");
+                            state.listener_cell = None;
+                            handle_listener_failure(
+                                &myself,
+                                state,
+                                mode::parse_degraded_reason(reason.as_ref()),
+                            )
+                            .await;
+                        }
+                        Some(ChildKind::Source) => {
+                            tracing::info!(?reason, "source_terminated_attempting_restart");
+                            state.source_cell = None;
+                            let is_device_change = reason.as_deref() == Some("device_change");
+                            if !children::try_restart_source(
+                                myself.get_cell(),
+                                state,
+                                !is_device_change,
+                            )
+                            .await
+                            {
+                                tracing::error!("source_restart_limit_exceeded_meltdown");
+                                meltdown(myself, state).await;
+                            }
+                        }
+                        Some(ChildKind::Recorder) => {
+                            tracing::info!(?reason, "recorder_terminated_attempting_restart");
+                            state.recorder_cell = None;
+                            children::sync_source_recorder(state).await;
+                            if !children::try_restart_recorder(myself.get_cell(), state).await {
+                                tracing::error!("recorder_restart_limit_exceeded_meltdown");
+                                meltdown(myself, state).await;
+                            }
+                        }
+                        None => {
+                            tracing::warn!("unknown_child_terminated");
                         }
                     }
-                    Some(ChildKind::Recorder) => {
-                        tracing::info!(?reason, "recorder_terminated_attempting_restart");
-                        state.recorder_cell = None;
-                        children::sync_source_recorder(state).await;
-                        if !children::try_restart_recorder(myself.get_cell(), state).await {
-                            tracing::error!("recorder_restart_limit_exceeded_meltdown");
-                            meltdown(myself, state).await;
+                }
+                SupervisionEvent::ActorFailed(cell, error) => {
+                    match children::identify_child(state, &cell) {
+                        Some(ChildKind::Listener) => {
+                            tracing::info!(?error, "listener_failed");
+                            state.listener_cell = None;
+                            handle_listener_failure(
+                                &myself,
+                                state,
+                                DegradedError::StreamError {
+                                    message: format!("{:?}", error),
+                                },
+                            )
+                            .await;
                         }
-                    }
-                    None => {
-                        tracing::warn!("unknown_child_terminated");
+                        Some(ChildKind::Source) => {
+                            tracing::warn!(?error, "source_failed_attempting_restart");
+                            state.source_cell = None;
+                            if !children::try_restart_source(myself.get_cell(), state, true).await {
+                                tracing::error!("source_restart_limit_exceeded_meltdown");
+                                meltdown(myself, state).await;
+                            }
+                        }
+                        Some(ChildKind::Recorder) => {
+                            tracing::warn!(?error, "recorder_failed_attempting_restart");
+                            state.recorder_cell = None;
+                            children::sync_source_recorder(state).await;
+                            if !children::try_restart_recorder(myself.get_cell(), state).await {
+                                tracing::error!("recorder_restart_limit_exceeded_meltdown");
+                                meltdown(myself, state).await;
+                            }
+                        }
+                        None => {
+                            tracing::warn!("unknown_child_failed");
+                        }
                     }
                 }
             }
 
-            SupervisionEvent::ActorFailed(cell, error) => {
-                match children::identify_child(state, &cell) {
-                    Some(ChildKind::Listener) => {
-                        tracing::info!(?error, "listener_failed");
-                        state.listener_cell = None;
-                        handle_listener_failure(
-                            &myself,
-                            state,
-                            DegradedError::StreamError {
-                                message: format!("{:?}", error),
-                            },
-                        )
-                        .await;
-                    }
-                    Some(ChildKind::Source) => {
-                        tracing::warn!(?error, "source_failed_attempting_restart");
-                        state.source_cell = None;
-                        if !children::try_restart_source(myself.get_cell(), state, true).await {
-                            tracing::error!("source_restart_limit_exceeded_meltdown");
-                            meltdown(myself, state).await;
-                        }
-                    }
-                    Some(ChildKind::Recorder) => {
-                        tracing::warn!(?error, "recorder_failed_attempting_restart");
-                        state.recorder_cell = None;
-                        children::sync_source_recorder(state).await;
-                        if !children::try_restart_recorder(myself.get_cell(), state).await {
-                            tracing::error!("recorder_restart_limit_exceeded_meltdown");
-                            meltdown(myself, state).await;
-                        }
-                    }
-                    None => {
-                        tracing::warn!("unknown_child_failed");
-                    }
-                }
-            }
+            Ok(())
         }
-        Ok(())
+        .instrument(span)
+        .await
     }
 }
 

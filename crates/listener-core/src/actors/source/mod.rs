@@ -182,96 +182,99 @@ impl Actor for SourceActor {
         st: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         let span = session_span(&st.session_id);
-        let _guard = span.enter();
-
-        match msg {
-            SourceMsg::SetMicMute(muted) => {
-                st.mic_muted.store(muted, Ordering::Relaxed);
-            }
-            SourceMsg::GetMicMute(reply) => {
-                if !reply.is_closed() {
-                    let _ = reply.send(st.mic_muted.load(Ordering::Relaxed));
+        async {
+            match msg {
+                SourceMsg::SetMicMute(muted) => {
+                    st.mic_muted.store(muted, Ordering::Relaxed);
                 }
-            }
-            SourceMsg::GetMicDevice(reply) => {
-                if !reply.is_closed() {
-                    let _ = reply.send(st.mic_device.clone());
-                }
-            }
-            SourceMsg::PrepareListenerRefresh(reply) => {
-                st.listener_routing = ListenerRouting::Buffering;
-                let replay = st.pipeline.prepare_listener_refresh();
-                if !reply.is_closed() {
-                    let _ = reply.send(replay);
-                }
-            }
-            SourceMsg::SetListenerRouting(routing) => {
-                st.listener_routing = routing;
-                st.pipeline
-                    .on_listener_routing_changed(&st.listener_routing);
-            }
-            SourceMsg::SetRecorder(recorder) => {
-                st.recorder = recorder;
-            }
-            SourceMsg::CaptureFramesReady => {
-                st.capture_wake_pending.store(false, Ordering::Release);
-
-                for _ in 0..MAX_CAPTURE_FRAMES_PER_TICK {
-                    let frame = st
-                        .capture_frames
-                        .as_mut()
-                        .and_then(|frames| frames.try_recv().ok());
-                    let Some(frame) = frame else {
-                        break;
-                    };
-
-                    if let Err(reason) = st
-                        .pipeline
-                        .dispatch_frame(
-                            frame,
-                            st.current_mode,
-                            &st.listener_routing,
-                            st.recorder.as_ref(),
-                        )
-                        .await
-                    {
-                        tracing::error!(%reason, "recorder_audio_write_failed");
-                        st.runtime.emit_error(SessionErrorEvent::AudioError {
-                            session_id: st.session_id.clone(),
-                            error: reason.clone(),
-                            device: st.mic_device.clone(),
-                            is_fatal: true,
-                        });
-                        return Err(std::io::Error::other(reason).into());
+                SourceMsg::GetMicMute(reply) => {
+                    if !reply.is_closed() {
+                        let _ = reply.send(st.mic_muted.load(Ordering::Relaxed));
                     }
                 }
+                SourceMsg::GetMicDevice(reply) => {
+                    if !reply.is_closed() {
+                        let _ = reply.send(st.mic_device.clone());
+                    }
+                }
+                SourceMsg::PrepareListenerRefresh(reply) => {
+                    st.listener_routing = ListenerRouting::Buffering;
+                    let replay = st.pipeline.prepare_listener_refresh();
+                    if !reply.is_closed() {
+                        let _ = reply.send(replay);
+                    }
+                }
+                SourceMsg::SetListenerRouting(routing) => {
+                    st.listener_routing = routing;
+                    st.pipeline
+                        .on_listener_routing_changed(&st.listener_routing);
+                }
+                SourceMsg::SetRecorder(recorder) => {
+                    st.recorder = recorder;
+                }
+                SourceMsg::CaptureFramesReady => {
+                    st.capture_wake_pending.store(false, Ordering::Release);
 
-                let has_more = st
-                    .capture_frames
-                    .as_ref()
-                    .is_some_and(|frames| !frames.is_empty());
-                if has_more
-                    && !st.capture_wake_pending.swap(true, Ordering::AcqRel)
-                    && myself.cast(SourceMsg::CaptureFramesReady).is_err()
-                {
-                    return Err(
-                        std::io::Error::other("failed to schedule queued capture frames").into(),
-                    );
+                    for _ in 0..MAX_CAPTURE_FRAMES_PER_TICK {
+                        let frame = st
+                            .capture_frames
+                            .as_mut()
+                            .and_then(|frames| frames.try_recv().ok());
+                        let Some(frame) = frame else {
+                            break;
+                        };
+
+                        if let Err(reason) = st
+                            .pipeline
+                            .dispatch_frame(
+                                frame,
+                                st.current_mode,
+                                &st.listener_routing,
+                                st.recorder.as_ref(),
+                            )
+                            .await
+                        {
+                            tracing::error!(%reason, "recorder_audio_write_failed");
+                            st.runtime.emit_error(SessionErrorEvent::AudioError {
+                                session_id: st.session_id.clone(),
+                                error: reason.clone(),
+                                device: st.mic_device.clone(),
+                                is_fatal: true,
+                            });
+                            return Err(std::io::Error::other(reason).into());
+                        }
+                    }
+
+                    let has_more = st
+                        .capture_frames
+                        .as_ref()
+                        .is_some_and(|frames| !frames.is_empty());
+                    if has_more
+                        && !st.capture_wake_pending.swap(true, Ordering::AcqRel)
+                        && myself.cast(SourceMsg::CaptureFramesReady).is_err()
+                    {
+                        return Err(std::io::Error::other(
+                            "failed to schedule queued capture frames",
+                        )
+                        .into());
+                    }
+                }
+                SourceMsg::StreamFailed(reason) => {
+                    tracing::error!(%reason, "source_stream_failed_stopping");
+                    st.runtime.emit_error(SessionErrorEvent::AudioError {
+                        session_id: st.session_id.clone(),
+                        error: reason.clone(),
+                        device: st.mic_device.clone(),
+                        is_fatal: true,
+                    });
+                    myself.stop(Some(reason));
                 }
             }
-            SourceMsg::StreamFailed(reason) => {
-                tracing::error!(%reason, "source_stream_failed_stopping");
-                st.runtime.emit_error(SessionErrorEvent::AudioError {
-                    session_id: st.session_id.clone(),
-                    error: reason.clone(),
-                    device: st.mic_device.clone(),
-                    is_fatal: true,
-                });
-                myself.stop(Some(reason));
-            }
-        }
 
-        Ok(())
+            Ok(())
+        }
+        .instrument(span)
+        .await
     }
 
     async fn post_stop(
@@ -301,16 +304,17 @@ mod tests {
         },
     };
 
-    use futures_util::stream;
+    use futures_util::{StreamExt, stream};
     use ractor::Actor;
-    use tokio::sync::mpsc;
+    use tokio::sync::{mpsc, oneshot};
 
     use super::*;
     use crate::{
         SessionDataEvent, SessionLifecycleEvent, SessionProgressEvent,
         actors::source::ListenerRouting,
+        actors::{RecMsg, RecorderEnqueueResult},
     };
-    use anlg_audio::{CaptureConfig, CaptureStream, Error};
+    use anlg_audio::{CaptureConfig, CaptureFrame, CaptureStream, Error};
 
     struct TestRuntime {
         progress_tx: mpsc::UnboundedSender<SessionProgressEvent>,
@@ -347,6 +351,7 @@ mod tests {
         capture_tx: mpsc::UnboundedSender<Option<String>>,
         default_device_name_calls: AtomicUsize,
         end_immediately: bool,
+        emit_frame: bool,
     }
 
     impl AudioProvider for TestAudio {
@@ -354,6 +359,15 @@ mod tests {
             let _ = self.capture_tx.send(config.mic_device);
             if self.end_immediately {
                 Ok(CaptureStream::new(stream::empty()))
+            } else if self.emit_frame {
+                let frame = CaptureFrame {
+                    raw_mic: Arc::from(vec![0.0; config.chunk_size]),
+                    raw_speaker: Arc::from(vec![0.0; config.chunk_size]),
+                    aec_mic: None,
+                };
+                Ok(CaptureStream::new(
+                    stream::iter([Ok(frame)]).chain(stream::pending()),
+                ))
             } else {
                 Ok(CaptureStream::new(stream::pending()))
             }
@@ -412,6 +426,7 @@ mod tests {
             capture_tx,
             default_device_name_calls: AtomicUsize::new(0),
             end_immediately: false,
+            emit_frame: false,
         });
         let expected = mic_device.map(str::to_string);
         let (actor, handle) = Actor::spawn(
@@ -474,6 +489,7 @@ mod tests {
             capture_tx,
             default_device_name_calls: AtomicUsize::new(0),
             end_immediately: true,
+            emit_frame: false,
         });
         let (_actor, handle) = Actor::spawn(
             None,
@@ -511,5 +527,113 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+    }
+
+    struct BlockingRecorder;
+
+    struct BlockingRecorderState {
+        started_tx: Option<oneshot::Sender<()>>,
+        release_rx: Option<oneshot::Receiver<()>>,
+    }
+
+    #[ractor::async_trait]
+    impl Actor for BlockingRecorder {
+        type Msg = RecMsg;
+        type State = BlockingRecorderState;
+        type Arguments = (oneshot::Sender<()>, oneshot::Receiver<()>);
+
+        async fn pre_start(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            (started_tx, release_rx): Self::Arguments,
+        ) -> Result<Self::State, ActorProcessingErr> {
+            Ok(BlockingRecorderState {
+                started_tx: Some(started_tx),
+                release_rx: Some(release_rx),
+            })
+        }
+
+        async fn handle(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            message: Self::Msg,
+            state: &mut Self::State,
+        ) -> Result<(), ActorProcessingErr> {
+            let reply = match message {
+                RecMsg::AudioSingle(_, reply) | RecMsg::AudioDual(_, _, reply) => reply,
+                RecMsg::WriterFailed(_) => return Ok(()),
+            };
+
+            if let Some(started_tx) = state.started_tx.take() {
+                let _ = started_tx.send(());
+            }
+            if let Some(release_rx) = state.release_rx.take() {
+                let _ = release_rx.await;
+            }
+            let _ = reply.send(RecorderEnqueueResult::Accepted);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn source_dispatch_exits_session_span_while_awaiting_recorder() {
+        tracing::subscriber::with_default(tracing_subscriber::registry(), || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let (started_tx, started_rx) = oneshot::channel();
+                    let (release_tx, release_rx) = oneshot::channel();
+                    let (recorder, recorder_handle) =
+                        Actor::spawn(None, BlockingRecorder, (started_tx, release_rx))
+                            .await
+                            .unwrap();
+                    let (progress_tx, _progress_rx) = mpsc::unbounded_channel();
+                    let (capture_tx, _capture_rx) = mpsc::unbounded_channel();
+                    let audio = Arc::new(TestAudio {
+                        capture_tx,
+                        default_device_name_calls: AtomicUsize::new(0),
+                        end_immediately: false,
+                        emit_frame: true,
+                    });
+                    let (source, source_handle) = Actor::spawn(
+                        None,
+                        SourceActor,
+                        SourceArgs {
+                            mic_device: None,
+                            onboarding: false,
+                            runtime: Arc::new(TestRuntime {
+                                progress_tx,
+                                error_tx: None,
+                            }),
+                            audio,
+                            session_id: "span-test".to_string(),
+                            listener_routing: ListenerRouting::Dropped,
+                            recorder: Some(recorder.clone()),
+                        },
+                    )
+                    .await
+                    .unwrap();
+
+                    tokio::time::timeout(std::time::Duration::from_secs(1), started_rx)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    assert!(tracing::Span::current().is_none());
+
+                    let _ = release_tx.send(());
+                    source.stop(None);
+                    recorder.stop(None);
+                    tokio::time::timeout(std::time::Duration::from_secs(1), source_handle)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    tokio::time::timeout(std::time::Duration::from_secs(1), recorder_handle)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                });
+        });
     }
 }
