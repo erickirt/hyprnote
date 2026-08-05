@@ -55,7 +55,6 @@ const mocks = vi.hoisted(() => ({
   ),
   loadSessionShareAttachments: vi.fn(),
   prepareSessionShareAttachment: vi.fn(),
-  setAttachmentCloudSyncEnabled: vi.fn(),
   loadSessionShareSyncState: vi.fn(),
   syncStatus: "clean" as "clean" | "conflict" | null,
   recordPublishedSessionShareState: vi.fn().mockResolvedValue(undefined),
@@ -132,10 +131,6 @@ vi.mock("./attachment-controls", () => ({
   },
 }));
 
-vi.mock("~/session/attachments", () => ({
-  setAttachmentCloudSyncEnabled: mocks.setAttachmentCloudSyncEnabled,
-}));
-
 vi.mock("./source", () => ({
   loadSessionShareSource: mocks.loadSessionShareSource,
   useAvailableShareWorkspaces: () => mocks.workspaces,
@@ -180,8 +175,16 @@ vi.mock("./client", async (importOriginal) => {
 });
 
 vi.mock("@anlg/ui/components/ui/popover", () => ({
-  AppFloatingPanel: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
+  AppFloatingPanel: ({
+    children,
+    className,
+  }: {
+    children: React.ReactNode;
+    className?: string;
+  }) => (
+    <div data-testid="share-floating-panel" className={className}>
+      {children}
+    </div>
   ),
   Popover: ({
     children,
@@ -389,11 +392,6 @@ describe("SessionShareButton", () => {
     mocks.sharedAttachmentMap = new Map();
     mocks.attachmentControlProps = null;
     mocks.loadSessionShareAttachments.mockResolvedValue([]);
-    mocks.setAttachmentCloudSyncEnabled.mockImplementation(
-      async (_sessionId: string, _attachmentId: string, enabled: boolean) => {
-        mocks.events.push(enabled ? "cloud-on" : "cloud-off");
-      },
-    );
     mocks.durableNote = {
       shareId: SHARE_ID,
       workspaceId: WORKSPACE_ID,
@@ -605,12 +603,20 @@ describe("SessionShareButton", () => {
     await openSharePopover();
 
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByTestId("share-popover").className).toContain(
-      "min-h-[340px]",
+    expect(screen.getByRole("heading", { name: "Share" }).className).toContain(
+      "sr-only",
     );
-    expect(screen.getByTestId("share-popover").className).toContain(
-      "max-h-[min(540px,calc(100vh-64px))]",
+    expect(screen.getByTestId("share-floating-panel").className).toContain(
+      "min-h-[330px]",
     );
+    expect(screen.getByTestId("share-floating-panel").className).toContain(
+      "max-h-[min(530px,calc(100vh-74px))]",
+    );
+    expect(
+      screen
+        .getByTestId("share-floating-panel")
+        .querySelector('[class*="overflow-y-auto"]'),
+    ).not.toBeNull();
     expect(screen.getByTestId("share-popover").className).toContain(
       "w-[440px]",
     );
@@ -1148,17 +1154,17 @@ describe("SessionShareButton", () => {
     expect(mocks.upsertDurableSharedNoteCache).not.toHaveBeenCalled();
   });
 
-  it("revokes a shared copy before making its private backup local-only", async () => {
+  it("stops sharing audio without changing the local recording", async () => {
     const localAttachment = {
       id: "local-attachment",
-      filename: "diagram.png",
-      contentType: "image/png",
+      filename: "audio.mp3",
+      contentType: "audio/mpeg",
       sizeBytes: 42,
       sha256: "a".repeat(64),
-      sourceType: "note_upload",
-      sourceId: "diagram.png",
-      cloudSyncEnabled: true,
-      cloudObjectKey: "private/object.anb1",
+      sourceType: "session_audio",
+      sourceId: "session-1",
+      cloudSyncEnabled: false,
+      cloudObjectKey: "",
       localAvailability: "present",
       transferDirection: null,
       transferPhase: "completed",
@@ -1189,20 +1195,16 @@ describe("SessionShareButton", () => {
     mocks.events = [];
 
     act(() => {
-      mocks.attachmentControlProps.onCloudChange(localAttachment, false);
+      mocks.attachmentControlProps.onShareChange(localAttachment, false);
     });
 
     await waitFor(() =>
-      expect(mocks.setAttachmentCloudSyncEnabled).toHaveBeenCalledWith(
-        "session-1",
-        localAttachment.id,
-        false,
+      expect(mocks.publishSessionShareSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({ attachmentIds: [] }),
       ),
     );
-    expect(mocks.publishSessionShareSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({ attachmentIds: [] }),
-    );
-    expect(mocks.events.slice(0, 3)).toEqual(["load", "publish", "cloud-off"]);
+    expect(mocks.prepareSessionShareAttachment).not.toHaveBeenCalled();
+    expect(mocks.events.slice(0, 2)).toEqual(["load", "publish"]);
   });
 
   it("abandons an open draft when the account changes", async () => {
@@ -1554,7 +1556,7 @@ describe("SessionShareButton", () => {
     ).not.toBeNull();
   });
 
-  it("invites every session participant seeded into the field", async () => {
+  it("lists meeting participants as people and invites them together", async () => {
     mocks.managedNote = null;
     mocks.loadManagedSharedNoteForSession.mockResolvedValue(null);
     mocks.participants = [
@@ -1572,7 +1574,11 @@ describe("SessionShareButton", () => {
     await openSharePopover();
     mocks.sendSessionAccessInvitationEmail.mockClear();
 
-    expect(screen.getByText("Sungbin Jo")).not.toBeNull();
+    const participantName = screen.getByText("Sungbin Jo");
+    expect(participantName.parentElement?.parentElement?.className).toContain(
+      "min-h-9",
+    );
+    expect(screen.getByText("sungbin@e.com")).not.toBeNull();
     expect(screen.getByText("yujong@e.com")).not.toBeNull();
     expect(screen.queryByText("Artem")).toBeNull();
     expect(screen.queryByText("Dropped")).toBeNull();

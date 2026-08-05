@@ -35,7 +35,11 @@ import {
   type GeneralAccessValue,
 } from "./general-access";
 import { useSessionInvitationManagement } from "./invitation-management";
-import { ShareInviteForm, useShareInvite } from "./invite-recipients";
+import {
+  ShareInviteForm,
+  ShareInviteRecipientRows,
+  useShareInvite,
+} from "./invite-recipients";
 import {
   copyPublicSessionShareUrl,
   copySessionShareUrl,
@@ -119,7 +123,6 @@ export function SessionSharePopoverContent({
   });
 
   const attachmentMutation = useSessionAttachmentManagement({
-    sessionId,
     identity,
     managementAvailable: Boolean(management),
     canExpand,
@@ -345,21 +348,16 @@ export function SessionSharePopoverContent({
       sideOffset={8}
       aria-labelledby="session-share-heading"
       aria-describedby="session-share-description"
-      className="grid max-h-[min(540px,calc(100vh-64px))] min-h-[340px] w-[440px] max-w-[calc(100vw-16px)] overflow-hidden"
+      className="w-[440px] max-w-[calc(100vw-16px)] overflow-hidden"
     >
-      <AppFloatingPanel className="flex min-h-0 flex-col overflow-hidden">
+      <AppFloatingPanel className="flex max-h-[min(530px,calc(100vh-74px))] min-h-[330px] flex-col overflow-hidden">
         <div ref={operationLifecycleRef} className="contents">
-          <header className="border-border/60 border-b px-3 py-2 text-left">
-            <h2
-              id="session-share-heading"
-              className="text-sm leading-5 font-semibold tracking-normal"
-            >
-              <Trans>Share</Trans>
-            </h2>
-            <p id="session-share-description" className="sr-only">
-              <Trans>Invite people to this note.</Trans>
-            </p>
-          </header>
+          <h2 id="session-share-heading" className="sr-only">
+            <Trans>Share</Trans>
+          </h2>
+          <p id="session-share-description" className="sr-only">
+            <Trans>Invite people to this note.</Trans>
+          </p>
 
           <div className="scrollbar-soft min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2">
             <div className="space-y-2">
@@ -481,6 +479,11 @@ export function SessionSharePopoverContent({
                     </span>
                   </div>
 
+                  <ShareInviteRecipientRows
+                    invite={invite}
+                    disabled={!canPublish || inviteMutation.isPending}
+                  />
+
                   {data?.access.length
                     ? data.access.map((entry) => (
                         <AccessEntryRow
@@ -522,34 +525,18 @@ export function SessionSharePopoverContent({
                 <SessionAttachmentControls
                   attachments={sessionAttachments}
                   sharedAttachmentIds={sharedAttachmentIds}
-                  canUseCloud={canPublish}
-                  canInclude={
+                  canShare={
                     canPublish &&
                     sharedAttachmentsReady &&
                     Boolean(env.VITE_SUPABASE_URL)
                   }
-                  cloudPendingAttachmentId={
-                    attachmentMutation.isPending &&
-                    attachmentMutation.variables?.type === "cloud"
-                      ? (attachmentMutation.variables.attachment.id ?? null)
-                      : null
-                  }
-                  sharePendingAttachmentId={
-                    attachmentMutation.isPending &&
-                    attachmentMutation.variables?.type === "share"
+                  pendingAttachmentId={
+                    attachmentMutation.isPending
                       ? (attachmentMutation.variables?.attachment.id ?? null)
                       : null
                   }
-                  onCloudChange={(attachment, enabled) =>
-                    attachmentMutation.mutate({
-                      type: "cloud",
-                      attachment,
-                      enabled,
-                    })
-                  }
                   onShareChange={(attachment, included) =>
                     attachmentMutation.mutate({
-                      type: "share",
                       attachment,
                       included,
                     })

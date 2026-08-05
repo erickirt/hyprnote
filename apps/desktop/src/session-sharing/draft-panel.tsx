@@ -11,7 +11,11 @@ import {
   GeneralAccessSelector,
   type GeneralAccessTarget,
 } from "./general-access";
-import { ShareInviteForm, useShareInvite } from "./invite-recipients";
+import {
+  ShareInviteForm,
+  ShareInviteRecipientRows,
+  useShareInvite,
+} from "./invite-recipients";
 import type { AvailableShareWorkspace } from "./source";
 
 import { useAuth } from "~/auth";
@@ -56,20 +60,15 @@ export function SessionShareDraftContent({
       sideOffset={8}
       aria-labelledby="session-share-heading"
       aria-describedby="session-share-description"
-      className="grid max-h-[min(540px,calc(100vh-64px))] min-h-[340px] w-[440px] max-w-[calc(100vw-16px)] overflow-hidden"
+      className="w-[440px] max-w-[calc(100vw-16px)] overflow-hidden"
     >
-      <AppFloatingPanel className="flex min-h-0 flex-col overflow-hidden">
-        <header className="border-border/60 border-b px-3 py-2 text-left">
-          <h2
-            id="session-share-heading"
-            className="text-sm leading-5 font-semibold tracking-normal"
-          >
-            <Trans>Share</Trans>
-          </h2>
-          <p id="session-share-description" className="sr-only">
-            <Trans>Invite people to this note.</Trans>
-          </p>
-        </header>
+      <AppFloatingPanel className="flex max-h-[min(530px,calc(100vh-74px))] min-h-[330px] flex-col overflow-hidden">
+        <h2 id="session-share-heading" className="sr-only">
+          <Trans>Share</Trans>
+        </h2>
+        <p id="session-share-description" className="sr-only">
+          <Trans>Invite people to this note.</Trans>
+        </p>
 
         <div className="scrollbar-soft min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2">
           <div className="space-y-2">
@@ -84,22 +83,29 @@ export function SessionShareDraftContent({
                 onSubmit={(emails) => onAction({ type: "invite", emails })}
               />
 
-              <div className="mt-2 flex min-h-9 items-center gap-2 rounded-lg px-1.5 py-1">
-                <ContactFacehash name={ownerName} size={24} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium">
-                    {ownerName}{" "}
-                    <span className="text-muted-foreground">(You)</span>
-                  </p>
-                  {ownerEmail ? (
-                    <p className="text-muted-foreground truncate text-[10px]">
-                      {ownerEmail}
+              <div className="mt-2 space-y-0.5">
+                <div className="flex min-h-9 items-center gap-2 rounded-lg px-1.5 py-1">
+                  <ContactFacehash name={ownerName} size={24} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-medium">
+                      {ownerName}{" "}
+                      <span className="text-muted-foreground">(You)</span>
                     </p>
-                  ) : null}
+                    {ownerEmail ? (
+                      <p className="text-muted-foreground truncate text-[10px]">
+                        {ownerEmail}
+                      </p>
+                    ) : null}
+                  </div>
+                  <span className="text-muted-foreground shrink-0 text-[11px]">
+                    <Trans>Full access</Trans>
+                  </span>
                 </div>
-                <span className="text-muted-foreground shrink-0 text-[11px]">
-                  <Trans>Full access</Trans>
-                </span>
+
+                <ShareInviteRecipientRows
+                  invite={invite}
+                  disabled={disabled || actionPending}
+                />
               </div>
             </section>
 
