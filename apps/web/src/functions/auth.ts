@@ -17,6 +17,10 @@ import {
 } from "@/functions/supabase";
 import { sanitizeInternalReturnPath } from "@/lib/auth-redirect";
 import { captureOperationalError } from "@/lib/error-reporting";
+import {
+  clearServerAnalyticsIdentity,
+  identifyServerUserFromRequest,
+} from "@/lib/server-analytics";
 
 const shared = z.object({
   flow: z.enum(["desktop", "web"]).default("desktop"),
@@ -99,7 +103,7 @@ async function resolveTokensForFlow({
   return tokenSuccess(desktopSession);
 }
 
-function toSuccessTokenResponse(result: FlowTokenResult) {
+function toSuccessTokenResponse(result: FlowTokenResult, userId?: string) {
   if (!result.ok) {
     return { success: false as const, error: result.error };
   }
@@ -107,10 +111,11 @@ function toSuccessTokenResponse(result: FlowTokenResult) {
     success: true as const,
     access_token: result.access_token,
     refresh_token: result.refresh_token,
+    userId,
   };
 }
 
-function toMutationTokenResponse(result: FlowTokenResult) {
+function toMutationTokenResponse(result: FlowTokenResult, userId?: string) {
   if (!result.ok) {
     return { error: true as const, message: result.error };
   }
@@ -118,6 +123,7 @@ function toMutationTokenResponse(result: FlowTokenResult) {
     success: true as const,
     access_token: result.access_token,
     refresh_token: result.refresh_token,
+    userId,
   };
 }
 
@@ -261,6 +267,7 @@ export const signOutFn = createServerFn({ method: "POST" }).handler(
       return { success: false, message: error.message };
     }
 
+    clearServerAnalyticsIdentity();
     return { success: true };
   },
 );
@@ -282,12 +289,16 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
     }
 
     await upsertAdminGithubTokenIfNeeded(supabase, authData.session);
+    await identifyServerUserFromRequest(authData.session.user.id, {
+      method: "oauth",
+      flow: data.flow,
+    });
     const newAccount = isNewWebAccount(data.flow, authData.session, "oauth");
     const tokens = await resolveTokensForFlow({
       flow: data.flow,
       session: authData.session,
     });
-    const response = toSuccessTokenResponse(tokens);
+    const response = toSuccessTokenResponse(tokens, authData.session.user.id);
     return response.success ? { ...response, newAccount } : response;
   });
 
@@ -330,11 +341,18 @@ export const doPasswordSignUp = createServerFn({ method: "POST" })
         session: authData.session,
         email: data.email,
       });
-      const response = toMutationTokenResponse(tokens);
+      const response = toMutationTokenResponse(
+        tokens,
+        authData.session.user.id,
+      );
       return response.success ? { ...response, newAccount } : response;
     }
 
-    return { success: true, needsConfirmation: true };
+    return {
+      success: true,
+      needsConfirmation: true,
+      userId: authData.user?.id,
+    };
   });
 
 export const doPasswordSignIn = createServerFn({ method: "POST" })
@@ -365,7 +383,7 @@ export const doPasswordSignIn = createServerFn({ method: "POST" })
       session: authData.session,
       email: data.email,
     });
-    return toMutationTokenResponse(tokens);
+    return toMutationTokenResponse(tokens, authData.session.user.id);
   });
 
 export const exchangeOtpToken = createServerFn({ method: "POST" })
@@ -405,7 +423,7 @@ export const exchangeOtpToken = createServerFn({ method: "POST" })
       flow,
       session: authData.session,
     });
-    const response = toSuccessTokenResponse(tokens);
+    const response = toSuccessTokenResponse(tokens, authData.session.user.id);
     return response.success ? { ...response, newAccount } : response;
   });
 
