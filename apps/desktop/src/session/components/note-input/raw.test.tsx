@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   createEvent,
   fireEvent,
@@ -22,6 +23,9 @@ const hoisted = vi.hoisted(() => ({
   meetingChatRecords: [] as unknown[],
   eventParticipants: [] as Array<Record<string, unknown>>,
   userTemplates: [] as Array<Record<string, unknown>>,
+  replacementContent: null as unknown,
+  replaceContent: vi.fn(),
+  flushPendingChanges: vi.fn(),
   createTemplate: vi.fn(() => Promise.resolve("new-template")),
   openTemplatesTab: vi.fn(),
   noteEditorProps: [] as Record<string, unknown>[],
@@ -49,14 +53,38 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
-vi.mock("@anlg/editor/note", () => ({
-  normalizePortableAttachmentUrls: (value: unknown) => value,
-  NoteEditor: (props: Record<string, unknown>) => {
-    hoisted.noteEditorProps.push(props);
+vi.mock("@anlg/editor/note", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
 
-    return <div>Note editor</div>;
-  },
-}));
+  return {
+    normalizePortableAttachmentUrls: (value: unknown) => value,
+    NoteEditor: React.forwardRef((props: Record<string, unknown>, ref) => {
+      hoisted.noteEditorProps.push(props);
+      React.useImperativeHandle(ref, () => ({
+        view: null,
+        commands: {
+          replaceContent: (content: unknown) => {
+            hoisted.replacementContent = content;
+            hoisted.replaceContent(content);
+            (
+              props.onDocumentChange as ((content: unknown) => void) | undefined
+            )?.(content);
+          },
+        },
+        flushPendingChanges: () => {
+          hoisted.flushPendingChanges();
+          if (hoisted.replacementContent) {
+            (props.handleChange as (content: unknown) => void)(
+              hoisted.replacementContent,
+            );
+          }
+        },
+      }));
+
+      return <div>Note editor</div>;
+    }),
+  };
+});
 
 vi.mock("@anlg/plugin-analytics", () => ({
   commands: {
@@ -208,6 +236,9 @@ describe("RawEditor", () => {
     hoisted.meetingChatRecords = [];
     hoisted.eventParticipants = [];
     hoisted.userTemplates = [];
+    hoisted.replacementContent = null;
+    hoisted.replaceContent.mockReset();
+    hoisted.flushPendingChanges.mockReset();
     hoisted.createTemplate.mockReset();
     hoisted.createTemplate.mockResolvedValue("new-template");
     hoisted.openTemplatesTab.mockReset();
@@ -336,25 +367,29 @@ describe("RawEditor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Standup" }));
 
+    const expectedContent = {
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 2 },
+          content: [{ type: "text", text: "Yesterday" }],
+        },
+        { type: "paragraph" },
+        {
+          type: "heading",
+          attrs: { level: 2 },
+          content: [{ type: "text", text: "Today" }],
+        },
+        { type: "paragraph" },
+      ],
+    };
+    expect(hoisted.replaceContent).toHaveBeenCalledWith(expectedContent);
+    expect(hoisted.flushPendingChanges).toHaveBeenCalledOnce();
+
     await waitFor(() =>
       expect(hoisted.persistChange).toHaveBeenCalledWith({
-        raw_md: JSON.stringify({
-          type: "doc",
-          content: [
-            {
-              type: "heading",
-              attrs: { level: 2 },
-              content: [{ type: "text", text: "Yesterday" }],
-            },
-            { type: "paragraph" },
-            {
-              type: "heading",
-              attrs: { level: 2 },
-              content: [{ type: "text", text: "Today" }],
-            },
-            { type: "paragraph" },
-          ],
-        }),
+        raw_md: JSON.stringify(expectedContent),
       }),
     );
   });
@@ -397,10 +432,16 @@ describe("RawEditor", () => {
     const buttons = screen.getAllByRole("button");
 
     expect(heading.className).toContain("h-8");
+    expect(heading.className).toContain("text-muted-foreground");
     expect(heading.className).not.toContain("px-2");
     expect(buttons.every((button) => button.className.includes("h-8"))).toBe(
       true,
     );
+    expect(
+      buttons.every((button) =>
+        button.className.includes("text-muted-foreground"),
+      ),
+    ).toBe(true);
     expect(buttons.every((button) => !button.className.includes("px-2"))).toBe(
       true,
     );
@@ -411,6 +452,53 @@ describe("RawEditor", () => {
       "New template",
     ]);
     expect(screen.queryByRole("button", { name: "Board Meeting" })).toBeNull();
+  });
+
+  it("toggles template suggestions from live memo changes", () => {
+    hoisted.userTemplates = [
+      {
+        id: "default-project-kickoff",
+        title: "Project Kickoff",
+        pinned: false,
+        icon: { type: "emoji", value: "🚀" },
+        sections: [{ title: "Goals", description: "" }],
+      },
+    ];
+
+    render(<RawEditor sessionId="session-1" />);
+
+    expect(
+      screen.getByRole("button", { name: "Project Kickoff" }),
+    ).not.toBeNull();
+    const onDocumentChange = hoisted.noteEditorProps[
+      hoisted.noteEditorProps.length - 1
+    ]?.onDocumentChange as (content: unknown) => void;
+
+    act(() => {
+      onDocumentChange({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Live memo" }],
+          },
+        ],
+      });
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "Project Kickoff" }),
+    ).toBeNull();
+    expect(hoisted.persistChange).not.toHaveBeenCalled();
+
+    act(() => {
+      onDocumentChange({ type: "doc", content: [{ type: "paragraph" }] });
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Project Kickoff" }),
+    ).not.toBeNull();
+    expect(hoisted.persistChange).not.toHaveBeenCalled();
   });
 
   it("prioritizes event-aware template suggestions", () => {

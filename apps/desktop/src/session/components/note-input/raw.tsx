@@ -1,7 +1,7 @@
 import { useLingui } from "@lingui/react/macro";
 import { Plus } from "@phosphor-icons/react";
 import type { EditorView } from "prosemirror-view";
-import { forwardRef, useCallback, useMemo, useRef } from "react";
+import { forwardRef, useCallback, useMemo, useRef, useState } from "react";
 
 import { parseJsonContent } from "@anlg/editor/markdown";
 import {
@@ -104,9 +104,29 @@ export const RawEditor = forwardRef<
       () => removeDocumentTitle(parseJsonContent(rawMd), sessionTitle),
       [rawMd, sessionTitle],
     );
-    const isMemoEmpty = useMemo(
+    const persistedIsMemoEmpty = useMemo(
       () => !hasStoredNoteContent(JSON.stringify(initialContent)),
       [initialContent],
+    );
+    const [liveMemoState, setLiveMemoState] = useState(() => ({
+      sessionId,
+      isEmpty: persistedIsMemoEmpty,
+    }));
+    const isMemoEmpty =
+      liveMemoState.sessionId === sessionId
+        ? liveMemoState.isEmpty
+        : persistedIsMemoEmpty;
+    const editorRef = useRef<NoteEditorRef>(null);
+    const setEditorRef = useCallback(
+      (editor: NoteEditorRef | null) => {
+        editorRef.current = editor;
+        if (typeof ref === "function") {
+          ref(editor);
+        } else if (ref) {
+          ref.current = editor;
+        }
+      },
+      [ref],
     );
 
     const persistChange = useCallback(
@@ -150,34 +170,46 @@ export const RawEditor = forwardRef<
       [persistChange, hasNonEmptyText],
     );
 
-    const handleApplyTemplate = useCallback(
-      (template: UserTemplate) => {
-        const content = template.sections.flatMap((section) => {
-          const title = section.title.trim();
-          if (!title) {
-            return [];
+    const handleDocumentChange = useCallback(
+      (input: JSONContent) => {
+        const isEmpty = !hasStoredNoteContent(JSON.stringify(input));
+        setLiveMemoState((current) => {
+          if (current.sessionId === sessionId && current.isEmpty === isEmpty) {
+            return current;
           }
-
-          return [
-            {
-              type: "heading",
-              attrs: { level: 2 },
-              content: [{ type: "text", text: title }],
-            },
-            { type: "paragraph" },
-          ];
-        });
-        if (content.length === 0) {
-          return;
-        }
-
-        handleChange({ type: "doc", content });
-        trackAnalyticsEvent("template_applied", {
-          entry_point: "memo",
+          return { sessionId, isEmpty };
         });
       },
-      [handleChange],
+      [sessionId],
     );
+
+    const handleApplyTemplate = useCallback((template: UserTemplate) => {
+      const content = template.sections.flatMap((section) => {
+        const title = section.title.trim();
+        if (!title) {
+          return [];
+        }
+
+        return [
+          {
+            type: "heading",
+            attrs: { level: 2 },
+            content: [{ type: "text", text: title }],
+          },
+          { type: "paragraph" },
+        ];
+      });
+      if (content.length === 0) {
+        return;
+      }
+
+      const nextContent = { type: "doc", content };
+      editorRef.current?.commands.replaceContent(nextContent);
+      editorRef.current?.flushPendingChanges();
+      trackAnalyticsEvent("template_applied", {
+        entry_point: "memo",
+      });
+    }, []);
 
     const mentionConfig = useMentionConfig();
     const commentAnchors = useSessionCommentAnchors(sessionId);
@@ -198,12 +230,13 @@ export const RawEditor = forwardRef<
         <>
           <div className="relative min-h-full">
             <NoteEditor
-              ref={ref}
+              ref={setEditorRef}
               className={cn(["session-note-editor", className])}
               key={`session-${sessionId}-raw`}
               initialContent={initialContent}
               resolveAttachment={resolveAttachment}
               handleChange={handleChange}
+              onDocumentChange={handleDocumentChange}
               placeholderComponent={placeholderComponent}
               mentionConfig={mentionConfig}
               sessionMentionDropConfig={sessionMentionDropConfig}
@@ -377,7 +410,7 @@ function TemplateEmptyState({
         onClick={handleCreateTemplate}
         className={cn([
           "hover:bg-accent focus-visible:bg-accent flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left",
-          "text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-hidden",
+          "text-muted-foreground hover:text-foreground focus-visible:text-foreground transition-colors focus-visible:outline-hidden",
         ])}
       >
         <Plus aria-hidden className="size-4" />
@@ -413,7 +446,7 @@ function TemplateSection({
           onClick={() => onApply(template)}
           className={cn([
             "hover:bg-accent focus-visible:bg-accent flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left",
-            "text-foreground transition-colors focus-visible:outline-hidden",
+            "text-muted-foreground hover:text-foreground focus-visible:text-foreground transition-colors focus-visible:outline-hidden",
           ])}
         >
           <TemplateIconGlyph icon={template.icon} className="size-4 text-sm" />
