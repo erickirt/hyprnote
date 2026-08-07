@@ -1,4 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
+import { Plus } from "@phosphor-icons/react";
 import type { EditorView } from "prosemirror-view";
 import { forwardRef, useCallback, useMemo, useRef } from "react";
 
@@ -17,6 +18,7 @@ import { useNoteFileHandlerConfig } from "./file-handler";
 import { MeetingChatHighlights } from "./meeting-chat-highlights";
 
 import { trackAnalyticsEvent } from "~/analytics";
+import { useSessionEventParticipants } from "~/calendar/queries";
 import { AppLinkView } from "~/editor-bridge/app-link-view";
 import { useMentionConfig } from "~/editor-bridge/mention-config";
 import { openEditorLink } from "~/editor-bridge/open-editor-link";
@@ -30,10 +32,36 @@ import { removeDocumentTitle } from "~/session/title-content";
 import {
   TemplateIconGlyph,
   type UserTemplate,
+  useCreateTemplate,
+  useOpenTemplatesTab,
   useUserTemplates,
 } from "~/templates";
 
 const extraNodeViews = { appLink: AppLinkView, session: SessionNodeView };
+const defaultSuggestedTemplateIds = [
+  "default-project-kickoff",
+  "default-daily-standup",
+  "default-one-on-one-meeting",
+];
+const contextualTemplateRules = [
+  {
+    id: "default-sales-discovery-call",
+    pattern:
+      /\b(sales|discovery|demo|prospect|lead|client|customer|pipeline|qualification|qualifying|pitch)\b/i,
+  },
+  {
+    id: "default-project-kickoff",
+    pattern: /\b(kickoff|kick-off|project launch)\b/i,
+  },
+  {
+    id: "default-daily-standup",
+    pattern: /\b(standup|stand-up|daily sync|scrum)\b/i,
+  },
+  {
+    id: "default-one-on-one-meeting",
+    pattern: /\b(1:1|one[- ]on[- ]one)\b/i,
+  },
+];
 
 export const RawEditor = forwardRef<
   NoteEditorRef,
@@ -41,6 +69,8 @@ export const RawEditor = forwardRef<
     sessionId: string;
     rawMd: string;
     sessionTitle: string;
+    eventTitle?: string;
+    eventDescription?: string;
     className?: string;
     onNavigateToTitle?: (pixelWidth?: number) => void;
     syncTasks?: boolean;
@@ -54,6 +84,8 @@ export const RawEditor = forwardRef<
       sessionId,
       rawMd,
       sessionTitle,
+      eventTitle,
+      eventDescription,
       className,
       onNavigateToTitle,
       syncTasks = true,
@@ -193,7 +225,12 @@ export const RawEditor = forwardRef<
               }}
             />
             {isMemoEmpty ? (
-              <FavoriteTemplateList onApply={handleApplyTemplate} />
+              <TemplateEmptyState
+                sessionId={sessionId}
+                eventTitle={eventTitle ?? sessionTitle}
+                eventDescription={eventDescription}
+                onApply={handleApplyTemplate}
+              />
             ) : null}
           </div>
           <MeetingChatHighlights sessionId={sessionId} />
@@ -205,7 +242,11 @@ export const RawEditor = forwardRef<
 
 function getFavoriteTemplates(templates: UserTemplate[]) {
   return [...templates]
-    .filter((template) => template.pinned)
+    .filter(
+      (template) =>
+        template.pinned &&
+        template.sections.some((section) => section.title.trim()),
+    )
     .sort((a, b) => {
       const orderA = a.pinOrder ?? Infinity;
       const orderB = b.pinOrder ?? Infinity;
@@ -216,49 +257,172 @@ function getFavoriteTemplates(templates: UserTemplate[]) {
     });
 }
 
-function FavoriteTemplateList({
+function getSuggestedTemplates(
+  templates: UserTemplate[],
+  favoriteTemplates: UserTemplate[],
+  {
+    eventTitle,
+    eventDescription,
+    participantCount,
+  }: {
+    eventTitle?: string;
+    eventDescription?: string;
+    participantCount: number;
+  },
+) {
+  const favoriteIds = new Set(favoriteTemplates.map((template) => template.id));
+  const availableTemplates = templates.filter(
+    (template) =>
+      !favoriteIds.has(template.id) &&
+      template.sections.some((section) => section.title.trim()),
+  );
+  const eventText = `${eventTitle ?? ""} ${eventDescription ?? ""}`;
+  const contextualIds = contextualTemplateRules
+    .filter((rule) => rule.pattern.test(eventText))
+    .map((rule) => rule.id);
+  if (participantCount === 2) {
+    contextualIds.push("default-one-on-one-meeting");
+  }
+  const preferredTemplateIds = [
+    ...new Set([...contextualIds, ...defaultSuggestedTemplateIds]),
+  ];
+  const preferredTemplates = preferredTemplateIds.flatMap((id) => {
+    const template = availableTemplates.find(
+      (candidate) => candidate.id === id,
+    );
+    return template ? [template] : [];
+  });
+  const preferredIds = new Set(
+    preferredTemplates.map((template) => template.id),
+  );
+  const fallbackTemplates = availableTemplates
+    .filter((template) => !preferredIds.has(template.id))
+    .sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+
+  return [...preferredTemplates, ...fallbackTemplates].slice(
+    0,
+    defaultSuggestedTemplateIds.length,
+  );
+}
+
+function TemplateEmptyState({
+  sessionId,
+  eventTitle,
+  eventDescription,
   onApply,
 }: {
+  sessionId: string;
+  eventTitle?: string;
+  eventDescription?: string;
   onApply: (template: UserTemplate) => void;
 }) {
   const { t } = useLingui();
   const userTemplates = useUserTemplates();
+  const eventParticipants = useSessionEventParticipants(sessionId);
+  const createTemplate = useCreateTemplate("session_note");
+  const openTemplatesTab = useOpenTemplatesTab();
   const favoriteTemplates = useMemo(
     () => getFavoriteTemplates(userTemplates),
     [userTemplates],
   );
+  const suggestedTemplates = useMemo(
+    () =>
+      getSuggestedTemplates(userTemplates, favoriteTemplates, {
+        eventTitle,
+        eventDescription,
+        participantCount: eventParticipants.length,
+      }),
+    [
+      eventDescription,
+      eventParticipants.length,
+      eventTitle,
+      favoriteTemplates,
+      userTemplates,
+    ],
+  );
+  const handleCreateTemplate = useCallback(() => {
+    void (async () => {
+      const templateId = await createTemplate({
+        title: "New Template",
+        description: "",
+        sections: [],
+      });
+      if (!templateId) {
+        return;
+      }
 
-  if (favoriteTemplates.length === 0) {
+      openTemplatesTab({
+        selectedMineId: templateId,
+        selectedWebIndex: null,
+        isWebMode: false,
+        showHomepage: false,
+      });
+    })();
+  }, [createTemplate, openTemplatesTab]);
+
+  return (
+    <div className="absolute inset-x-0 top-8 z-10 flex flex-col">
+      <TemplateSection
+        label={t`Start with a favorite template`}
+        templates={favoriteTemplates}
+        onApply={onApply}
+      />
+      <TemplateSection
+        label={t`Suggested templates`}
+        templates={suggestedTemplates}
+        onApply={onApply}
+      />
+      <button
+        type="button"
+        onClick={handleCreateTemplate}
+        className={cn([
+          "hover:bg-accent focus-visible:bg-accent flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left",
+          "text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-hidden",
+        ])}
+      >
+        <Plus aria-hidden className="size-4" />
+        <span className="text-sm font-medium">{t`New template`}</span>
+      </button>
+    </div>
+  );
+}
+
+function TemplateSection({
+  label,
+  templates,
+  onApply,
+}: {
+  label: string;
+  templates: UserTemplate[];
+  onApply: (template: UserTemplate) => void;
+}) {
+  const { t } = useLingui();
+  if (templates.length === 0) {
     return null;
   }
 
   return (
-    <div className="absolute inset-x-0 top-8 z-10 flex flex-col gap-1">
-      <p className="text-muted-foreground px-2 text-xs">
-        {t`Start with a favorite template`}
+    <>
+      <p className="text-muted-foreground flex h-8 items-center text-xs">
+        {label}
       </p>
-      <div className="flex flex-col">
-        {favoriteTemplates.map((template) => (
-          <button
-            key={template.id}
-            type="button"
-            onClick={() => onApply(template)}
-            className={cn([
-              "hover:bg-accent focus-visible:bg-accent flex h-8 w-full items-center gap-2 rounded-md px-2 text-left",
-              "text-foreground transition-colors focus-visible:outline-hidden",
-            ])}
-          >
-            <TemplateIconGlyph
-              icon={template.icon}
-              className="size-4 text-sm"
-            />
-            <span className="min-w-0 truncate text-sm font-medium">
-              {template.title || t`Untitled`}
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
+      {templates.map((template) => (
+        <button
+          key={template.id}
+          type="button"
+          onClick={() => onApply(template)}
+          className={cn([
+            "hover:bg-accent focus-visible:bg-accent flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left",
+            "text-foreground transition-colors focus-visible:outline-hidden",
+          ])}
+        >
+          <TemplateIconGlyph icon={template.icon} className="size-4 text-sm" />
+          <span className="min-w-0 truncate text-sm font-medium">
+            {template.title || t`Untitled`}
+          </span>
+        </button>
+      ))}
+    </>
   );
 }
 
