@@ -33,6 +33,7 @@ fn make_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::delete_webhook::<tauri::Wry>,
             commands::test_webhook::<tauri::Wry>,
             commands::dispatch_event::<tauri::Wry>,
+            commands::export_meeting_markdown::<tauri::Wry>,
             commands::get_cloud_snapshot::<tauri::Wry>,
             commands::list_cloud_snapshot_ids::<tauri::Wry>,
         ])
@@ -162,6 +163,124 @@ mod test {
             request = request.json(&body);
         }
         request.send().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn markdown_export_writes_stable_file_into_directory() {
+        let pool = seeded_pool().await;
+        let export = anlg_agent_access::get_meeting_export(&pool, "meeting-1".to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            commands::markdown_export_filename(&export.meeting),
+            "2026-07-13 Planning [meeting-].md"
+        );
+
+        let untitled = anlg_agent_access::Meeting {
+            title: "  ".to_string(),
+            started_at: String::new(),
+            created_at: "bad".to_string(),
+            ..export.meeting.clone()
+        };
+        assert_eq!(
+            commands::markdown_export_filename(&untitled),
+            "Untitled meeting [meeting-].md"
+        );
+
+        let hostile = anlg_agent_access::Meeting {
+            title: "a/b:c*d?".to_string(),
+            ..export.meeting.clone()
+        };
+        assert_eq!(
+            commands::markdown_export_filename(&hostile),
+            "2026-07-13 a_b_c_d_ [meeting-].md"
+        );
+
+        let directory =
+            std::env::temp_dir().join(format!("anlg-md-export-{}", uuid::Uuid::new_v4()));
+        let path = commands::write_markdown_export(&directory, &export).unwrap();
+        assert_eq!(
+            path.file_name().unwrap().to_string_lossy(),
+            "2026-07-13 Planning [meeting-].md"
+        );
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("# Planning"));
+        assert!(written.contains("hello world"));
+
+        let other_meeting_file = directory.join("2026-07-13 Other [meeting2].md");
+        std::fs::write(&other_meeting_file, "other").unwrap();
+        let mut retitled = anlg_agent_access::get_meeting_export(&pool, "meeting-1".to_string())
+            .await
+            .unwrap();
+        retitled.meeting.title = "Planning follow-up".to_string();
+        let renamed = commands::write_markdown_export(&directory, &retitled).unwrap();
+        assert_eq!(
+            renamed.file_name().unwrap().to_string_lossy(),
+            "2026-07-13 Planning follow-up [meeting-].md"
+        );
+        assert!(!path.exists(), "stale export under the old title remains");
+        assert!(other_meeting_file.exists());
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[tokio::test]
+    async fn note_enhanced_reexports_markdown_and_records_the_run() {
+        let pool = seeded_pool().await;
+        let directory = std::env::temp_dir().join(format!("anlg-md-auto-{}", uuid::Uuid::new_v4()));
+        for (id, value) in [
+            (
+                "automation_markdown_export_enabled",
+                serde_json::json!(true),
+            ),
+            (
+                "automation_markdown_export_directory",
+                serde_json::json!(directory.to_string_lossy()),
+            ),
+        ] {
+            sqlx::query("INSERT INTO app_settings (id, value_json) VALUES (?, ?)")
+                .bind(id)
+                .bind(value.to_string())
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        commands::run_markdown_export_automation(&pool, "meeting-1").await;
+
+        let exported = directory.join("2026-07-13 Planning [meeting-].md");
+        assert!(exported.exists());
+        let last_run: String = sqlx::query_scalar(
+            "SELECT value_json FROM app_settings \
+             WHERE id = 'automation_markdown_export_last_run'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        // Stored the way the desktop settings layer writes string settings:
+        // a JSON-encoded string containing the record JSON.
+        let record: String = serde_json::from_str(&last_run).unwrap();
+        let record: serde_json::Value = serde_json::from_str(&record).unwrap();
+        assert_eq!(record["status"], "success");
+        assert_eq!(record["detail"], exported.to_string_lossy().into_owned());
+        assert!(record["at"].as_str().is_some_and(|at| at.ends_with('Z')));
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[tokio::test]
+    async fn note_enhanced_export_skips_silently_without_configuration() {
+        let pool = seeded_pool().await;
+
+        commands::run_markdown_export_automation(&pool, "meeting-1").await;
+
+        let row: Option<String> = sqlx::query_scalar(
+            "SELECT value_json FROM app_settings \
+             WHERE id = 'automation_markdown_export_last_run'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert!(row.is_none());
     }
 
     #[tokio::test]
