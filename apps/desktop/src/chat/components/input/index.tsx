@@ -24,6 +24,7 @@ import { useMentionConfig } from "~/editor-bridge/mention-config";
 
 export function ChatMessageInput({
   draftKey,
+  layout = "floating",
   onSendMessage,
   disabled: disabledProp,
   isStreaming,
@@ -32,6 +33,7 @@ export function ChatMessageInput({
   onContextRefsChange,
 }: {
   draftKey: string;
+  layout?: "floating" | "right-panel";
   onSendMessage: (
     content: string,
     parts: Array<{ type: "text"; text: string }>,
@@ -71,12 +73,10 @@ export function ChatMessageInput({
   useAutoFocusEditor({ editorRef, disabled, shouldFocus });
   const mentionConfig = useMentionConfig();
   const isSendDisabled = Boolean(disabled) || !hasContent;
-  const isRightPanel = chat.mode === "RightPanelOpen";
-  const isFloating = chat.mode === "FloatingOpen";
+  const isRightPanel = layout === "right-panel";
+  const isFloating = layout === "floating";
   const showSendControl = !isFloating || isStreaming || hasContent;
-  const placeholderText = isFloating
-    ? t`Ask anything`
-    : t`Ask & search about anything, or be creative!`;
+  const placeholderText = t`Ask anything`;
   const placeholderTextRef = useRef(placeholderText);
   placeholderTextRef.current = placeholderText;
   const placeholder = useMemo(
@@ -196,7 +196,7 @@ function Container({
     <div
       className={cn([
         "relative min-w-0 shrink-0",
-        isRightPanel ? "px-3 pb-4" : "px-1 pb-1",
+        isRightPanel ? "px-2 pb-3" : "px-1 pb-1",
       ])}
     >
       {indicator}
