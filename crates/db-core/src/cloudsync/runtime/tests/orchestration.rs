@@ -555,3 +555,146 @@ async fn after_sync_hook_receives_the_bounded_network_result() {
         Some(&expected)
     );
 }
+
+fn table_change(table: &str, seq: u64) -> anlg_db_change::TableChange {
+    anlg_db_change::TableChange {
+        table: table.to_string(),
+        kind: anlg_db_change::TableChangeKind::Insert,
+        seq,
+    }
+}
+
+#[test]
+fn change_wake_deadline_only_pulls_the_next_sync_earlier() {
+    let base = tokio::time::Instant::now();
+    let interval_deadline = base + Duration::from_secs(30);
+
+    assert_eq!(
+        cloudsync_wake_deadline(interval_deadline, None),
+        interval_deadline
+    );
+    assert_eq!(
+        cloudsync_wake_deadline(interval_deadline, Some(base + Duration::from_secs(1))),
+        base + Duration::from_secs(1)
+    );
+    assert_eq!(
+        cloudsync_wake_deadline(interval_deadline, Some(base + Duration::from_secs(60))),
+        interval_deadline,
+        "a change wake must never postpone the standing sync cadence"
+    );
+}
+
+#[tokio::test]
+async fn synced_table_changes_wake_and_unrelated_tables_do_not() {
+    let (tx, mut rx) = tokio::sync::broadcast::channel(8);
+    let synced = std::collections::HashSet::from(["sessions".to_string()]);
+    let mut closed = false;
+
+    tx.send(table_change("local_settings", 1)).unwrap();
+    tx.send(table_change("sessions", 2)).unwrap();
+    tokio::time::timeout(
+        Duration::from_millis(100),
+        next_synced_change(&mut rx, &synced, &mut closed),
+    )
+    .await
+    .expect("a synced table change did not wake the loop");
+
+    tx.send(table_change("local_settings", 3)).unwrap();
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            next_synced_change(&mut rx, &synced, &mut closed),
+        )
+        .await
+        .is_err(),
+        "an unrelated table change woke the sync loop"
+    );
+}
+
+#[tokio::test]
+async fn lagged_change_subscription_wakes_conservatively() {
+    let (tx, mut rx) = tokio::sync::broadcast::channel(1);
+    let synced = std::collections::HashSet::from(["sessions".to_string()]);
+    let mut closed = false;
+
+    tx.send(table_change("local_settings", 1)).unwrap();
+    tx.send(table_change("local_settings", 2)).unwrap();
+    tokio::time::timeout(
+        Duration::from_millis(100),
+        next_synced_change(&mut rx, &synced, &mut closed),
+    )
+    .await
+    .expect("a lagged change subscription did not wake conservatively");
+}
+
+#[tokio::test]
+async fn closed_change_subscription_never_wakes() {
+    let (tx, mut rx) = tokio::sync::broadcast::channel::<anlg_db_change::TableChange>(1);
+    let synced = std::collections::HashSet::from(["sessions".to_string()]);
+    let mut closed = false;
+    drop(tx);
+
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            next_synced_change(&mut rx, &synced, &mut closed),
+        )
+        .await
+        .is_err(),
+        "a closed change subscription completed a wake"
+    );
+    assert!(closed, "a closed change subscription was not flagged");
+}
+
+#[tokio::test]
+async fn post_sync_drain_empties_the_queue_and_reports_synced_changes() {
+    let (tx, mut rx) = tokio::sync::broadcast::channel(8);
+    let synced = std::collections::HashSet::from(["sessions".to_string()]);
+    let mut closed = false;
+
+    tx.send(table_change("sessions", 1)).unwrap();
+    tx.send(table_change("sessions", 2)).unwrap();
+    assert!(
+        drain_pending_changes(&mut rx, &synced),
+        "a drained synced-table change did not request a follow-up round"
+    );
+
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            next_synced_change(&mut rx, &synced, &mut closed),
+        )
+        .await
+        .is_err(),
+        "echoed changes survived the post-sync drain"
+    );
+}
+
+#[test]
+fn post_sync_drain_ignores_unrelated_changes() {
+    let (tx, mut rx) = tokio::sync::broadcast::channel(8);
+    let synced = std::collections::HashSet::from(["sessions".to_string()]);
+
+    tx.send(table_change("local_settings", 1)).unwrap();
+    assert!(
+        !drain_pending_changes(&mut rx, &synced),
+        "an unrelated drained change requested a follow-up round"
+    );
+    assert!(
+        !drain_pending_changes(&mut rx, &synced),
+        "an empty queue requested a follow-up round"
+    );
+}
+
+#[test]
+fn post_sync_drain_reports_lag_conservatively() {
+    let (tx, mut rx) = tokio::sync::broadcast::channel(1);
+    let synced = std::collections::HashSet::from(["sessions".to_string()]);
+
+    tx.send(table_change("local_settings", 1)).unwrap();
+    tx.send(table_change("local_settings", 2)).unwrap();
+    assert!(
+        drain_pending_changes(&mut rx, &synced),
+        "a lagged drain did not request a follow-up round"
+    );
+}
