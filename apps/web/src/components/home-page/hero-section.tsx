@@ -97,7 +97,7 @@ function HeroWorkflowDemo() {
                       }, 800);
                     }, 800);
                   }, 800);
-                }, 500);
+                }, 2000);
               }
             }, 50);
           }
@@ -155,7 +155,7 @@ function HeroWorkflowDemo() {
         <div className="relative min-h-[260px] overflow-hidden text-left text-sm sm:min-h-[300px]">
           <div
             className={cn([
-              "absolute inset-0 space-y-3 p-5 transition-opacity duration-500 sm:p-6",
+              "absolute inset-0 space-y-3 px-5 pt-2 pb-5 transition-opacity duration-500 sm:px-6 sm:pt-3 sm:pb-6",
               isSummaryPhase ? "opacity-0" : "opacity-100",
             ])}
           >
@@ -190,7 +190,7 @@ function HeroWorkflowDemo() {
           </div>
           <div
             className={cn([
-              "absolute inset-0 space-y-4 overflow-hidden p-5 text-left transition-opacity duration-500 sm:p-6",
+              "absolute inset-0 space-y-4 overflow-hidden px-5 pt-2 pb-5 text-left transition-opacity duration-500 sm:px-6 sm:pt-3 sm:pb-6",
               isSummaryPhase ? "opacity-100" : "opacity-0",
             ])}
           >
@@ -298,7 +298,7 @@ function HeroWorkflowDemo() {
       </div>
       <div
         className={cn([
-          "pointer-events-none absolute right-1 bottom-9 z-10 w-[74%] transition-all duration-500 sm:-right-2 sm:bottom-12 sm:w-[76%]",
+          "pointer-events-none absolute right-1 bottom-9 z-10 w-[66%] transition-all duration-500 sm:-right-2 sm:bottom-12 sm:w-[68%]",
           isSummaryPhase
             ? "translate-y-2 opacity-0"
             : "translate-y-0 opacity-100",
@@ -309,7 +309,7 @@ function HeroWorkflowDemo() {
           alt="Four participants in a video meeting"
           width={1200}
           height={215}
-          className="h-auto w-full rounded-xl shadow-xl ring-1 ring-neutral-900/10"
+          className="h-auto w-full rounded-xl shadow-xl"
           decoding="async"
         />
       </div>
