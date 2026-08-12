@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import sharp from "sharp";
 
 import {
@@ -16,6 +18,11 @@ const OG_HEIGHT = 630;
 const CACHE_CONTROL =
   "public, max-age=0, s-maxage=86400, stale-while-revalidate=604800";
 const SHARED_NOTE_CACHE_CONTROL = "public, max-age=0, s-maxage=60";
+const SERIF_FONT_FAMILY = "Redaction 70, Georgia, serif";
+const SANS_FONT_FAMILY = "SF Pro Text, Arial, sans-serif";
+const FONT_CONFIG_FILENAME = "fonts.conf";
+
+let ogFontsConfigured = false;
 
 type BlogOgImageInput = {
   title: string;
@@ -146,7 +153,7 @@ function createParticipantAvatarStack(
       const centerX = 100 + index * 42;
       const gradientId = `avatar-gradient-${index}`;
       const clipId = `avatar-clip-${index}`;
-      return `<defs>${createAvatarGradientSvg(avatar.seed, gradientId)}<clipPath id="${clipId}"><circle cx="${centerX}" cy="${centerY}" r="28"/></clipPath></defs><g data-avatar="participant" data-avatar-renderer="app"><circle cx="${centerX}" cy="${centerY}" r="28" fill="url(#${gradientId})"/>${avatar.image ? `<image href="${avatar.image}" x="${centerX - 28}" y="${centerY - 28}" width="56" height="56" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})"/>` : ""}<circle cx="${centerX}" cy="${centerY}" r="30" fill="none" stroke="#f4f0e8" stroke-width="4"/><text x="${centerX}" y="${centerY + 7}" fill="#ffffff" fill-opacity="0.82" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" text-anchor="middle" style="mix-blend-mode:overlay">${escapeXml(avatar.label)}</text></g>`;
+      return `<defs>${createAvatarGradientSvg(avatar.seed, gradientId)}<clipPath id="${clipId}"><circle cx="${centerX}" cy="${centerY}" r="28"/></clipPath></defs><g data-avatar="participant" data-avatar-renderer="app"><circle cx="${centerX}" cy="${centerY}" r="28" fill="url(#${gradientId})"/>${avatar.image ? `<image href="${avatar.image}" x="${centerX - 28}" y="${centerY - 28}" width="56" height="56" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})"/>` : ""}<circle cx="${centerX}" cy="${centerY}" r="30" fill="none" stroke="#f4f0e8" stroke-width="4"/><text x="${centerX}" y="${centerY + 7}" fill="#ffffff" fill-opacity="0.82" font-family="${SANS_FONT_FAMILY}" font-size="18" font-weight="700" text-anchor="middle" style="mix-blend-mode:overlay">${escapeXml(avatar.label)}</text></g>`;
     })
     .reverse()
     .join("");
@@ -205,16 +212,16 @@ export function createBlogOgSvg(input: BlogOgImageInput) {
   ${title
     .map(
       (line, index) =>
-        `<text x="86" y="${titleStartY + index * 86}" fill="#181613" font-family="Georgia, 'Times New Roman', serif" font-size="76" font-weight="700">${escapeXml(line)}</text>`,
+        `<text x="86" y="${titleStartY + index * 86}" fill="#181613" font-family="${SERIF_FONT_FAMILY}" font-size="76" font-weight="700">${escapeXml(line)}</text>`,
     )
     .join("")}
   ${description
     .map(
       (line, index) =>
-        `<text x="90" y="${descriptionStartY + index * 42}" fill="#57534e" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="500">${escapeXml(line)}</text>`,
+        `<text x="90" y="${descriptionStartY + index * 42}" fill="#57534e" font-family="${SANS_FONT_FAMILY}" font-size="32" font-weight="500">${escapeXml(line)}</text>`,
     )
     .join("")}
-  <text x="86" y="552" fill="#756b5d" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="600">${escapeXml(meta || "anarlog.so")}</text>
+  <text x="86" y="552" fill="#756b5d" font-family="${SANS_FONT_FAMILY}" font-size="26" font-weight="600">${escapeXml(meta || "anarlog.so")}</text>
   ${createAnarlogWordmark({ x: 962, y: 516, width: 152 })}
 </svg>`;
 }
@@ -262,19 +269,20 @@ export function createSharedNoteOgSvg(
   ${title
     .map(
       (line, index) =>
-        `<text x="72" y="${titleStartY + index * 82}" fill="#181613" font-family="Georgia, 'Times New Roman', serif" font-size="${titleFontSize}" font-weight="700">${escapeXml(line)}</text>`,
+        `<text x="72" y="${titleStartY + index * 82}" fill="#181613" font-family="${SERIF_FONT_FAMILY}" font-size="${titleFontSize}" font-weight="700">${escapeXml(line)}</text>`,
     )
     .join("")}
-  ${summary ? `<text data-summary="meeting" x="72" y="${summaryY}" fill="#57534e" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="500">${escapeXml(summary)}</text>` : ""}
+  ${summary ? `<text data-summary="meeting" x="72" y="${summaryY}" fill="#57534e" font-family="${SANS_FONT_FAMILY}" font-size="31" font-weight="500">${escapeXml(summary)}</text>` : ""}
   ${createParticipantAvatarStack(avatarParticipants, avatarImages, footerCenterY)}
-  <text x="${participantX}" y="${footerCenterY + 9}"${participantTextLength} fill="#37322d" font-family="Arial, Helvetica, sans-serif" font-size="27" font-weight="600">${escapeXml(participantSummary)}</text>
+  <text x="${participantX}" y="${footerCenterY + 9}"${participantTextLength} fill="#37322d" font-family="${SANS_FONT_FAMILY}" font-size="27" font-weight="600">${escapeXml(participantSummary)}</text>
   <circle cx="${separatorX}" cy="${footerCenterY}" r="3" fill="#9d9387"/>
-  <text x="${dateX}" y="${footerCenterY + 9}" fill="#57534e" font-family="Arial, Helvetica, sans-serif" font-size="27" font-weight="500">${escapeXml(date)}</text>
+  <text x="${dateX}" y="${footerCenterY + 9}" fill="#57534e" font-family="${SANS_FONT_FAMILY}" font-size="27" font-weight="500">${escapeXml(date)}</text>
   ${createAnarlogWordmark({ x: 963, y: 477, width: 165 })}
 </svg>`;
 }
 
 async function renderOgImage(svg: string, cacheControl: string) {
+  configureOgFonts();
   const png = await sharp(Buffer.from(svg)).png().toBuffer();
 
   return new Response(new Uint8Array(png), {
@@ -285,11 +293,24 @@ async function renderOgImage(svg: string, cacheControl: string) {
   });
 }
 
+function configureOgFonts() {
+  if (ogFontsConfigured) return;
+  ogFontsConfigured = true;
+
+  const candidates = [
+    join(process.cwd(), "public", "fonts", FONT_CONFIG_FILENAME),
+    join(process.cwd(), "apps", "web", "public", "fonts", FONT_CONFIG_FILENAME),
+  ];
+  const fontConfigPath = candidates.find(existsSync);
+  if (fontConfigPath) process.env.FONTCONFIG_FILE = fontConfigPath;
+}
+
 export async function renderBlogOgImage(input: BlogOgImageInput) {
   return renderOgImage(createBlogOgSvg(input), CACHE_CONTROL);
 }
 
 export async function renderSharedNoteOgImage(input: SharedNoteOgImageInput) {
+  configureOgFonts();
   const participantPresentation = createSharedNoteParticipantPresentation(
     input.participants ?? [],
   );
