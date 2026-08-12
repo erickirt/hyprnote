@@ -20,6 +20,7 @@ const footerGroups = [
       { label: "GitHub", href: "https://github.com/fastrepl/anarlog" },
       { label: "X", href: "https://x.com/anarlogapp" },
       { label: "Discord", to: "/discord/" },
+      { label: "Reddit", href: "https://www.reddit.com/r/anarlog/" },
     ],
   },
   {
