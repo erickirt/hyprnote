@@ -158,8 +158,16 @@ msgstr ""
 msgid "Add API key"
 msgstr ""
 
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Add at least one example summary."
+msgstr ""
+
 #: src/settings/sync/index.tsx
 msgid "Add device"
+msgstr ""
+
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Add example"
 msgstr ""
 
 #: src/settings/general/spoken-languages.tsx
@@ -287,10 +295,6 @@ msgstr ""
 msgid "Anarlog Pro required"
 msgstr ""
 
-#: src/templates/auto-form.tsx
-msgid "Anarlog sends these separately, so editing the prompt cannot remove the meeting source material."
-msgstr ""
-
 #: src/main/sync-status.tsx
 msgid "Anarlog will keep retrying"
 msgstr ""
@@ -370,6 +374,14 @@ msgstr ""
 msgid "Assignees:"
 msgstr ""
 
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Attach Markdown or text"
+msgstr ""
+
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Attach up to three past summaries you like. Anarlog will learn how you prefer meeting notes to be structured and written."
+msgstr ""
+
 #: src/settings/general/index.tsx
 #: src/settings/general/permissions.tsx
 msgid "Audio"
@@ -384,11 +396,7 @@ msgid "Authorize access in your browser, then return to Anarlog."
 msgstr ""
 
 #: src/templates/auto-form.tsx
-msgid "Auto prompt cannot be empty."
-msgstr ""
-
-#: src/templates/auto-form.tsx
-msgid "Auto summary prompt"
+msgid "Auto summary format"
 msgstr ""
 
 #: src/settings/automations/index.tsx
@@ -505,6 +513,7 @@ msgstr ""
 #: src/settings/general/storage/legacy-cleanup.tsx
 #: src/settings/todo/github.tsx
 #: src/shared/ui/destructive-confirmation-dialog.tsx
+#: src/templates/auto-format-examples-dialog.tsx
 msgid "Cancel"
 msgstr ""
 
@@ -607,6 +616,10 @@ msgstr ""
 msgid "Choose a transcription model to start listening."
 msgstr ""
 
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Choose an AI model before generating a format."
+msgstr ""
+
 #: src/settings/automations/index.tsx
 msgid "Choose an export folder first."
 msgstr ""
@@ -637,6 +650,10 @@ msgstr ""
 
 #: src/settings/appearance/theme.tsx
 msgid "Choose how Anarlog looks on this device."
+msgstr ""
+
+#: src/templates/auto-form.tsx
+msgid "Choose how Auto structures and styles your summaries."
 msgstr ""
 
 #: src/settings/general/audio-settings.tsx
@@ -897,10 +914,6 @@ msgstr ""
 msgid "Contacts"
 msgstr ""
 
-#: src/templates/auto-form.tsx
-msgid "Context always provided"
-msgstr ""
-
 #: src/imports/screen.tsx
 #: src/onboarding/calendar.tsx
 msgid "Continue"
@@ -1006,10 +1019,6 @@ msgstr ""
 #: src/settings/general/audio-settings.tsx
 #: src/templates/auto-form.tsx
 msgid "Current default"
-msgstr ""
-
-#: src/templates/auto-form.tsx
-msgid "Customize Auto"
 msgstr ""
 
 #: src/templates/auto-form.tsx
@@ -1199,16 +1208,16 @@ msgstr ""
 msgid "Duration"
 msgstr ""
 
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Each example must be 12,000 characters or fewer."
+msgstr ""
+
 #: src/sidebar/automations.tsx
 msgid "Edit"
 msgstr ""
 
 #: src/session/components/outer-header/metadata/date.tsx
 msgid "Edit date"
-msgstr ""
-
-#: src/templates/auto-form.tsx
-msgid "Edit the complete system prompt used when Auto generates a summary."
 msgstr ""
 
 #: src/onboarding/account/after-login.tsx
@@ -1288,6 +1297,18 @@ msgstr ""
 
 #: src/imports/screen.tsx
 msgid "Everything is already here."
+msgstr ""
+
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Example summary"
+msgstr ""
+
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Examples are used only to improve this format. They are not saved or reused for future meetings."
+msgstr ""
+
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Examples must be Markdown or plain text files."
 msgstr ""
 
 #: src/settings/general/notification.tsx
@@ -1532,6 +1553,18 @@ msgstr ""
 msgid "Imports"
 msgstr ""
 
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Improve format"
+msgstr ""
+
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Improve summary format"
+msgstr ""
+
+#: src/templates/auto-form.tsx
+msgid "Improve with examples"
+msgstr ""
+
 #: src/sidebar/timeline/upcoming-meeting.ts
 msgid "In {minutes}m {seconds}s"
 msgstr ""
@@ -1687,7 +1720,7 @@ msgid "Live"
 msgstr ""
 
 #: src/templates/auto-form.tsx
-msgid "Loading Auto prompt..."
+msgid "Loading Auto format..."
 msgstr ""
 
 #: src/calendar/components/calendar-selection.tsx
@@ -1778,10 +1811,6 @@ msgstr ""
 
 #: src/onboarding/index.tsx
 msgid "Meeting history imported"
-msgstr ""
-
-#: src/templates/auto-form.tsx
-msgid "Meeting notes"
 msgstr ""
 
 #: src/settings/general/index.tsx
@@ -2194,8 +2223,11 @@ msgstr ""
 
 #: src/session/components/note-input/transcript/renderer/speaker-assign.tsx
 #: src/session/components/outer-header/overflow/export-modal.tsx
-#: src/templates/auto-form.tsx
 msgid "Participants"
+msgstr ""
+
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Paste a past summary you like..."
 msgstr ""
 
 #: src/instruction/index.tsx
@@ -2287,7 +2319,7 @@ msgid "Preview"
 msgstr ""
 
 #: src/templates/auto-form.tsx
-msgid "Preview the complete system prompt, then upgrade to Pro to customize it."
+msgid "Preview the summary format, then upgrade to Pro to customize it."
 msgstr ""
 
 #: src/session/components/note-input/search/bar.tsx
@@ -2421,6 +2453,11 @@ msgstr ""
 msgid "Remove device"
 msgstr ""
 
+#. placeholder {0}: index + 1
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "Remove example {0}"
+msgstr ""
+
 #: src/contacts/contact-page-header.tsx
 msgid "Remove photo"
 msgstr ""
@@ -2489,7 +2526,7 @@ msgid "Reset"
 msgstr ""
 
 #: src/templates/auto-form.tsx
-msgid "Reset to Anarlog default"
+msgid "Reset to default format"
 msgstr ""
 
 #: src/session-sharing/management-panel.tsx
@@ -2709,10 +2746,6 @@ msgstr ""
 #. placeholder {0}: formatSyncBytes(entry.sent_bytes)
 #: src/settings/sync/index.tsx
 msgid "Sent {0}"
-msgstr ""
-
-#: src/templates/auto-form.tsx
-msgid "Session details"
 msgstr ""
 
 #: src/session/components/note-input/header.tsx
@@ -3098,6 +3131,14 @@ msgstr ""
 msgid "Summary"
 msgstr ""
 
+#: src/templates/auto-form.tsx
+msgid "Summary format"
+msgstr ""
+
+#: src/templates/auto-form.tsx
+msgid "Summary format cannot be empty."
+msgstr ""
+
 #: src/session/components/note-input/enhanced/enhance-error.tsx
 msgid "Summary generation failed"
 msgstr ""
@@ -3288,7 +3329,6 @@ msgstr ""
 
 #: src/session/components/note-input/header-transcript.tsx
 #: src/session/components/outer-header/overflow/export-modal.tsx
-#: src/templates/auto-form.tsx
 msgid "Transcript"
 msgstr ""
 
@@ -3418,7 +3458,7 @@ msgid "Upgrade to Pro for {0}"
 msgstr ""
 
 #: src/templates/auto-form.tsx
-msgid "Upgrade to Pro to customize Auto"
+msgid "Upgrade to Pro to customize Auto format"
 msgstr ""
 
 #: src/session-sharing/index.tsx
@@ -3478,10 +3518,6 @@ msgstr ""
 
 #: src/onboarding/permissions.tsx
 msgid "Use your microphone to capture your voice"
-msgstr ""
-
-#: src/templates/auto-form.tsx
-msgid "Variables"
 msgstr ""
 
 #: src/settings/general/storage/legacy-cleanup.tsx
@@ -3555,6 +3591,10 @@ msgstr ""
 
 #: src/sidebar/timeline/index.tsx
 msgid "You can undo this action for a short time."
+msgstr ""
+
+#: src/templates/auto-format-examples-dialog.tsx
+msgid "You can use up to three example summaries."
 msgstr ""
 
 #: src/onboarding/account/after-login.tsx

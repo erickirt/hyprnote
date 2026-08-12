@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   getTemplateSource: vi.fn(),
   renderTemplate: vi.fn(),
   setSettingValue: vi.fn(),
+  toastError: vi.fn(),
+  inferSummaryFormat: vi.fn(),
+  model: { modelId: "test-model" },
   billing: {
     isPro: true,
     isUpgradingToPro: false,
@@ -98,6 +101,20 @@ vi.mock("@anlg/plugin-template", () => ({
   },
 }));
 
+vi.mock("@anlg/ui/components/ui/toast", () => ({
+  sonnerToast: { error: mocks.toastError },
+}));
+
+vi.mock("./auto-format-inference", () => ({
+  inferSummaryFormat: mocks.inferSummaryFormat,
+  MAX_FORMAT_EXAMPLE_LENGTH: 12_000,
+  MAX_FORMAT_EXAMPLES: 3,
+}));
+
+vi.mock("~/ai/hooks", () => ({
+  useLanguageModel: () => mocks.model,
+}));
+
 vi.mock("~/settings/queries", () => ({
   setSettingValue: mocks.setSettingValue,
 }));
@@ -110,10 +127,9 @@ vi.mock("~/shared/config", () => ({
   useConfigValue: (key: string) => mocks.values[key] ?? "",
 }));
 
-import { AutoPromptForm, AutoTemplateDetails } from "./auto-form";
+import { AutoFormatForm, AutoTemplateDetails } from "./auto-form";
 
-const defaultPrompt =
-  "Today is {{ current_date }}. Write the summary in {{ language }}.";
+const defaultFormat = "- Use # headings.\n- Use bullet points.";
 
 function renderWithQueryClient(node: ReactNode) {
   const queryClient = new QueryClient({
@@ -124,7 +140,7 @@ function renderWithQueryClient(node: ReactNode) {
   );
 }
 
-describe("Auto prompt editor", () => {
+describe("Auto format editor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.values.auto_summary_prompt = "";
@@ -134,57 +150,44 @@ describe("Auto prompt editor", () => {
     mocks.billing.upgradeToPro.mockClear();
     mocks.getTemplateSource.mockResolvedValue({
       status: "ok",
-      data: defaultPrompt,
+      data: defaultFormat,
     });
     mocks.renderTemplate.mockResolvedValue({ status: "ok", data: "rendered" });
     mocks.setSettingValue.mockResolvedValue(undefined);
+    mocks.inferSummaryFormat.mockResolvedValue(
+      "- Begin with decisions.\n- Use concise bullets.",
+    );
   });
 
   afterEach(cleanup);
 
-  it("loads the built-in source and shows supported variables and context", async () => {
+  it("loads only the built-in format requirements", async () => {
     renderWithQueryClient(<AutoTemplateDetails />);
 
     expect(
       (await screen.findByRole("textbox", {
-        name: "Auto summary prompt",
+        name: "Auto summary format",
       })) as HTMLTextAreaElement,
-    ).toHaveProperty("value", defaultPrompt);
-    expect(screen.getByRole("button", { name: /Current date/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Language/ })).toBeTruthy();
-    expect(screen.getByText("Meeting notes")).toBeTruthy();
-    expect(screen.getByText("Transcript")).toBeTruthy();
+    ).toHaveProperty("value", defaultFormat);
+    expect(mocks.getTemplateSource).toHaveBeenCalledWith("enhanceFormat");
+    expect(screen.queryByText("Variables")).toBeNull();
   });
 
-  it("inserts supported variables as canonical prompt tokens", () => {
-    renderWithQueryClient(
-      <AutoPromptForm defaultPrompt={defaultPrompt} promptOverride="" />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /Language/ }));
-
-    expect(
-      screen.getByRole("textbox", {
-        name: "Auto summary prompt",
-      }) as HTMLTextAreaElement,
-    ).toHaveProperty("value", `${defaultPrompt}\n{{ language }}`);
-  });
-
-  it("keeps the prompt visible and read-only for Free users", () => {
+  it("keeps the format visible and read-only for Free users", () => {
     mocks.billing.isPro = false;
 
     renderWithQueryClient(
-      <AutoPromptForm defaultPrompt={defaultPrompt} promptOverride="" />,
+      <AutoFormatForm defaultFormat={defaultFormat} formatOverride="" />,
     );
 
     expect(
       screen.getByRole("textbox", {
-        name: "Auto summary prompt",
+        name: "Auto summary format",
       }) as HTMLTextAreaElement,
     ).toHaveProperty("readOnly", true);
     expect(
       screen.getByText(
-        "Preview the complete system prompt, then upgrade to Pro to customize it.",
+        "Preview the summary format, then upgrade to Pro to customize it.",
       ),
     ).toBeTruthy();
 
@@ -196,14 +199,106 @@ describe("Auto prompt editor", () => {
     expect(mocks.setSettingValue).not.toHaveBeenCalled();
   });
 
-  it("validates and saves a customized prompt", async () => {
+  it("routes example generation to the Pro upgrade for Free users", () => {
+    mocks.billing.isPro = false;
+
     renderWithQueryClient(
-      <AutoPromptForm defaultPrompt={defaultPrompt} promptOverride="" />,
+      <AutoFormatForm defaultFormat={defaultFormat} formatOverride="" />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Improve with examples" }),
+    );
+
+    expect(mocks.billing.upgradeToPro).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole("dialog", { name: "Improve summary format" }),
+    ).toBeNull();
+  });
+
+  it("generates an editable format from up to three transient examples", async () => {
+    renderWithQueryClient(
+      <AutoFormatForm defaultFormat={defaultFormat} formatOverride="" />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Improve with examples" }),
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Example summary 1" }),
+      { target: { value: "# Decisions\n- Ship the change" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add example" }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Example summary 2" }),
+      { target: { value: "# Decisions\n- Launch next week" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add example" }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Example summary 3" }),
+      { target: { value: "# Decisions\n- Keep concise" } },
+    );
+
+    expect(screen.getByRole("button", { name: "Add example" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Improve format" }));
+
+    await waitFor(() =>
+      expect(mocks.inferSummaryFormat).toHaveBeenCalledWith({
+        model: mocks.model,
+        examples: [
+          "# Decisions\n- Ship the change",
+          "# Decisions\n- Launch next week",
+          "# Decisions\n- Keep concise",
+        ],
+      }),
+    );
+    expect(
+      screen.getByRole("textbox", {
+        name: "Auto summary format",
+      }) as HTMLTextAreaElement,
+    ).toHaveProperty(
+      "value",
+      "- Begin with decisions.\n- Use concise bullets.",
+    );
+    expect(mocks.setSettingValue).not.toHaveBeenCalled();
+  });
+
+  it("accepts Markdown files as example summaries", async () => {
+    renderWithQueryClient(
+      <AutoFormatForm defaultFormat={defaultFormat} formatOverride="" />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Improve with examples" }),
+    );
+    const file = new File(["# Overview\n- Concise"], "summary.md", {
+      type: "text/markdown",
+    });
+    Object.defineProperty(file, "text", {
+      value: vi.fn().mockResolvedValue("# Overview\n- Concise"),
+    });
+
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [file] },
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("textbox", { name: "Example summary 1" }),
+      ).toHaveProperty("value", "# Overview\n- Concise"),
+    );
+  });
+
+  it("validates and saves a customized format", async () => {
+    renderWithQueryClient(
+      <AutoFormatForm defaultFormat={defaultFormat} formatOverride="" />,
     );
 
     fireEvent.change(
-      screen.getByRole("textbox", { name: "Auto summary prompt" }),
-      { target: { value: "Write in {{ language }}." } },
+      screen.getByRole("textbox", { name: "Auto summary format" }),
+      { target: { value: "Write a concise narrative." } },
     );
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -211,24 +306,24 @@ describe("Auto prompt editor", () => {
       expect(mocks.renderTemplate).toHaveBeenCalledWith({
         enhanceSystem: {
           language: "en",
-          promptOverride: "Write in {{ language }}.",
+          formatOverride: "Write a concise narrative.",
         },
       }),
     );
     expect(mocks.setSettingValue).toHaveBeenCalledWith(
       "auto_summary_prompt",
-      "Write in {{ language }}.",
+      "Write a concise narrative.",
     );
   });
 
   it("stores the default-equivalent source as an empty override", async () => {
     renderWithQueryClient(
-      <AutoPromptForm defaultPrompt={defaultPrompt} promptOverride="Custom" />,
+      <AutoFormatForm defaultFormat={defaultFormat} formatOverride="Custom" />,
     );
 
     fireEvent.change(
-      screen.getByRole("textbox", { name: "Auto summary prompt" }),
-      { target: { value: `  ${defaultPrompt}\n` } },
+      screen.getByRole("textbox", { name: "Auto summary format" }),
+      { target: { value: `  ${defaultFormat}\n` } },
     );
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -240,37 +335,40 @@ describe("Auto prompt editor", () => {
     );
   });
 
-  it("shows Jinja validation errors without saving", async () => {
+  it("toasts Jinja validation errors without saving", async () => {
     mocks.renderTemplate.mockResolvedValue({
       status: "error",
       error: "unknown variables: customer",
     });
     renderWithQueryClient(
-      <AutoPromptForm defaultPrompt={defaultPrompt} promptOverride="" />,
+      <AutoFormatForm defaultFormat={defaultFormat} formatOverride="" />,
     );
 
     fireEvent.change(
-      screen.getByRole("textbox", { name: "Auto summary prompt" }),
+      screen.getByRole("textbox", { name: "Auto summary format" }),
       { target: { value: "Hello {{ customer }}" } },
     );
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "unknown variables: customer",
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "unknown variables: customer",
+      ),
     );
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(mocks.setSettingValue).not.toHaveBeenCalled();
   });
 
-  it("resets a customized prompt to the built-in source", async () => {
+  it("resets a customized format to the built-in source", async () => {
     renderWithQueryClient(
-      <AutoPromptForm
-        defaultPrompt={defaultPrompt}
-        promptOverride="Custom prompt"
+      <AutoFormatForm
+        defaultFormat={defaultFormat}
+        formatOverride="Custom format"
       />,
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Reset to Anarlog default" }),
+      screen.getByRole("button", { name: "Reset to default format" }),
     );
 
     await waitFor(() =>
@@ -281,8 +379,38 @@ describe("Auto prompt editor", () => {
     );
     expect(
       screen.getByRole("textbox", {
-        name: "Auto summary prompt",
+        name: "Auto summary format",
       }) as HTMLTextAreaElement,
-    ).toHaveProperty("value", defaultPrompt);
+    ).toHaveProperty("value", defaultFormat);
+  });
+
+  it("extracts the editable portion from a legacy full prompt", () => {
+    renderWithQueryClient(
+      <AutoFormatForm
+        defaultFormat={defaultFormat}
+        formatOverride={`# General Instructions
+
+Protected instructions.
+
+# Format Requirements
+
+- Start with decisions.
+
+# About Notes
+
+Protected note guidance.
+
+# Guidelines
+
+Protected guidelines.`}
+      />,
+    );
+
+    expect(
+      screen.getByRole("textbox", {
+        name: "Auto summary format",
+      }) as HTMLTextAreaElement,
+    ).toHaveProperty("value", "- Start with decisions.");
+    expect(screen.queryByText("Protected instructions.")).toBeNull();
   });
 });

@@ -1,45 +1,43 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
-  BracketsCurly,
   CircleNotch,
   LockSimple,
+  MagicWand,
   Sparkle,
 } from "@phosphor-icons/react";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 
-import {
-  PromptEditor,
-  type PromptEditorHandle,
-  type PromptTokenDefinition,
-} from "@anlg/editor/prompt";
+import { PromptEditor, type PromptEditorHandle } from "@anlg/editor/prompt";
 import { commands as templateCommands } from "@anlg/plugin-template";
 import { Badge } from "@anlg/ui/components/ui/badge";
 import { Button } from "@anlg/ui/components/ui/button";
+import { sonnerToast } from "@anlg/ui/components/ui/toast";
 import { cn } from "@anlg/utils";
+
+import { AutoFormatExamplesDialog } from "./auto-format-examples-dialog";
 
 import { useBillingAccess } from "~/auth/billing-context";
 import { setSettingValue } from "~/settings/queries";
 import { useConfigValue } from "~/shared/config";
 
-export const AUTO_PROMPT_TOKENS: readonly PromptTokenDefinition[] = [
-  { name: "current_date", label: "Current date" },
-  { name: "language", label: "Language" },
-];
+const AUTO_FORMAT_TOKENS = [] as const;
+const LEGACY_CUSTOM_INSTRUCTIONS_PREAMBLE =
+  "For structure, formatting, tone, and emphasis, these instructions take precedence over the Format Requirements. They do not override the requirements to stay accurate, use only the provided source material, and return only the summary.";
 
 export function AutoTemplateDetails() {
-  const promptOverride = useConfigValue("auto_summary_prompt");
+  const formatOverride = useConfigValue("auto_summary_prompt");
   const sourceQuery = useQuery({
-    queryKey: ["template-source", "enhance-system"],
-    queryFn: loadDefaultAutoPrompt,
+    queryKey: ["template-source", "enhance-format"],
+    queryFn: loadDefaultAutoFormat,
     staleTime: Number.POSITIVE_INFINITY,
   });
 
   if (sourceQuery.isLoading) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-        <Trans>Loading Auto prompt...</Trans>
+        <Trans>Loading Auto format...</Trans>
       </div>
     );
   }
@@ -47,46 +45,50 @@ export function AutoTemplateDetails() {
   if (sourceQuery.error || !sourceQuery.data) {
     return (
       <div className="text-destructive flex h-full items-center justify-center px-6 text-center text-sm">
-        {sourceQuery.error?.message || "Auto prompt is unavailable."}
+        {sourceQuery.error?.message || "Auto format is unavailable."}
       </div>
     );
   }
 
   return (
-    <AutoPromptForm
-      key={`${promptOverride}:${sourceQuery.data}`}
-      defaultPrompt={sourceQuery.data}
-      promptOverride={promptOverride}
+    <AutoFormatForm
+      key={`${formatOverride}:${sourceQuery.data}`}
+      defaultFormat={sourceQuery.data}
+      formatOverride={formatOverride}
     />
   );
 }
 
-export function AutoPromptForm({
-  defaultPrompt,
-  promptOverride,
+export function AutoFormatForm({
+  defaultFormat,
+  formatOverride,
 }: {
-  defaultPrompt: string;
-  promptOverride: string;
+  defaultFormat: string;
+  formatOverride: string;
 }) {
   const { t } = useLingui();
   const billing = useBillingAccess();
   const editorRef = useRef<PromptEditorHandle>(null);
+  const [showExamplesDialog, setShowExamplesDialog] = useState(false);
   const selectedTemplateId = useConfigValue("selected_template_id");
   const isDefault = !selectedTemplateId;
-  const isCustomized = Boolean(promptOverride.trim());
-  const initialPrompt = isCustomized ? promptOverride : defaultPrompt;
+  const normalizedOverride = normalizeFormatOverride(formatOverride);
+  const isCustomized =
+    Boolean(normalizedOverride) &&
+    !formatsMatch(normalizedOverride, defaultFormat);
+  const initialFormat = isCustomized ? normalizedOverride : defaultFormat;
 
   const saveMutation = useMutation({
     mutationFn: async (source: string) => {
-      const normalized = normalizePrompt(source);
+      const normalized = normalizeFormat(source);
       if (!normalized) {
-        throw new Error(t`Auto prompt cannot be empty.`);
+        throw new Error(t`Summary format cannot be empty.`);
       }
-      const stored = promptsMatch(normalized, defaultPrompt) ? "" : normalized;
+      const stored = formatsMatch(normalized, defaultFormat) ? "" : normalized;
       const rendered = await templateCommands.render({
         enhanceSystem: {
           language: "en",
-          promptOverride: stored,
+          formatOverride: stored,
         },
       });
       if (rendered.status === "error") {
@@ -96,20 +98,21 @@ export function AutoPromptForm({
       await setSettingValue("auto_summary_prompt", stored);
       return stored;
     },
+    onError: (error) => sonnerToast.error(error.message),
   });
 
   const form = useForm({
-    defaultValues: { prompt: initialPrompt },
+    defaultValues: { format: initialFormat },
     onSubmit: async ({ value }) => {
       if (!billing.isPro) {
         billing.upgradeToPro();
         return;
       }
 
-      const stored = await saveMutation.mutateAsync(value.prompt);
-      const nextPrompt = stored || defaultPrompt;
-      form.reset({ prompt: nextPrompt });
-      editorRef.current?.setValue(nextPrompt);
+      const stored = await saveMutation.mutateAsync(value.format);
+      const nextFormat = stored || defaultFormat;
+      form.reset({ format: nextFormat });
+      editorRef.current?.setValue(nextFormat);
     },
   });
 
@@ -119,9 +122,9 @@ export function AutoPromptForm({
       return;
     }
 
-    await saveMutation.mutateAsync(defaultPrompt);
-    form.reset({ prompt: defaultPrompt });
-    editorRef.current?.setValue(defaultPrompt);
+    await saveMutation.mutateAsync(defaultFormat);
+    form.reset({ format: defaultFormat });
+    editorRef.current?.setValue(defaultFormat);
   };
 
   return (
@@ -165,48 +168,70 @@ export function AutoPromptForm({
       </div>
 
       <div className="scroll-fade-y min-h-0 flex-1 overflow-y-auto px-6 pt-3 pb-6">
-        <div className="mx-auto flex max-w-4xl flex-col gap-5">
-          <div>
-            <h1 className="text-lg font-semibold">
-              <Trans>Customize Auto</Trans>
-            </h1>
-            <p className="text-muted-foreground mt-1 text-sm">
+        <div className="flex max-w-4xl flex-col gap-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-lg font-semibold">
+                <Trans>Summary format</Trans>
+              </h1>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {billing.isPro ? (
+                  <Trans>
+                    Choose how Auto structures and styles your summaries.
+                  </Trans>
+                ) : (
+                  <Trans>
+                    Preview the summary format, then upgrade to Pro to customize
+                    it.
+                  </Trans>
+                )}
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => {
+                if (!billing.isPro) {
+                  billing.upgradeToPro();
+                  return;
+                }
+                setShowExamplesDialog(true);
+              }}
+              disabled={billing.isUpgradingToPro}
+            >
               {billing.isPro ? (
-                <Trans>
-                  Edit the complete system prompt used when Auto generates a
-                  summary.
-                </Trans>
+                <MagicWand className="size-4" />
               ) : (
-                <Trans>
-                  Preview the complete system prompt, then upgrade to Pro to
-                  customize it.
-                </Trans>
+                <LockSimple className="size-4" />
               )}
-            </p>
+              <Trans>Improve with examples</Trans>
+            </Button>
           </div>
 
-          <form.Field name="prompt">
+          <form.Field name="format">
             {(field) => (
               <div className="border-border bg-card overflow-hidden rounded-2xl border">
                 <div className="group/editor relative">
                   <PromptEditor
                     ref={editorRef}
-                    ariaLabel={t`Auto summary prompt`}
+                    ariaLabel={t`Auto summary format`}
                     className="min-h-[28rem] px-4 py-3 font-mono text-sm leading-5"
                     initialValue={field.state.value}
                     maxLength={16000}
                     onChange={field.handleChange}
                     onBlur={field.handleBlur}
                     readOnly={!billing.isPro}
-                    tokens={AUTO_PROMPT_TOKENS}
+                    tokens={AUTO_FORMAT_TOKENS}
                   />
                   {!billing.isPro ? (
                     <button
                       type="button"
                       onClick={billing.upgradeToPro}
                       disabled={billing.isUpgradingToPro}
-                      aria-label={t`Upgrade to Pro to customize Auto`}
-                      className="focus-visible:ring-ring absolute inset-0 cursor-pointer rounded-t-2xl focus-visible:ring-2 focus-visible:outline-none"
+                      aria-label={t`Upgrade to Pro to customize Auto format`}
+                      className="focus-visible:ring-ring absolute inset-0 cursor-pointer rounded-2xl focus-visible:ring-2 focus-visible:outline-none"
                     >
                       <span className="border-primary bg-primary text-primary-foreground pointer-events-none absolute top-3 right-3 flex translate-x-1 items-center gap-1 rounded-full border-2 px-3 py-1 text-xs font-medium opacity-0 shadow-[0_4px_14px_rgba(87,83,78,0.18)] transition-all duration-150 group-focus-within/editor:translate-x-0 group-focus-within/editor:opacity-100 group-hover/editor:translate-x-0 group-hover/editor:opacity-100">
                         {billing.isUpgradingToPro ? (
@@ -222,86 +247,27 @@ export function AutoPromptForm({
                     </button>
                   ) : null}
                 </div>
-                <div className="border-border bg-muted/40 flex items-center justify-between gap-3 border-t px-3 py-2">
-                  <span className="text-muted-foreground text-xs font-medium">
-                    <Trans>Variables</Trans>
-                  </span>
-                  <div className="flex flex-wrap justify-end gap-1.5">
-                    {AUTO_PROMPT_TOKENS.map((token) => (
-                      <Button
-                        key={token.name}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-7 rounded-full px-2.5 text-xs"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => {
-                          if (!billing.isPro) {
-                            billing.upgradeToPro();
-                            return;
-                          }
-                          editorRef.current?.insertToken(token.name);
-                        }}
-                      >
-                        <BracketsCurly className="size-3.5" />
-                        {token.label}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
               </div>
             )}
           </form.Field>
 
-          <div className="rounded-2xl border px-4 py-3">
-            <p className="text-sm font-medium">
-              <Trans>Context always provided</Trans>
-            </p>
-            <p className="text-muted-foreground mt-1 text-sm">
-              <Trans>
-                Anarlog sends these separately, so editing the prompt cannot
-                remove the meeting source material.
-              </Trans>
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Badge variant="secondary" className="rounded-full">
-                <Trans>Meeting notes</Trans>
-              </Badge>
-              <Badge variant="secondary" className="rounded-full">
-                <Trans>Transcript</Trans>
-              </Badge>
-              <Badge variant="secondary" className="rounded-full">
-                <Trans>Session details</Trans>
-              </Badge>
-              <Badge variant="secondary" className="rounded-full">
-                <Trans>Participants</Trans>
-              </Badge>
-            </div>
-          </div>
-
-          {saveMutation.error ? (
-            <p role="alert" className="text-destructive text-sm">
-              {saveMutation.error.message}
-            </p>
-          ) : null}
-
           <div className="flex items-center justify-end gap-2">
-            <form.Subscribe selector={(state) => state.values.prompt}>
-              {(currentPrompt) => (
+            <form.Subscribe selector={(state) => state.values.format}>
+              {(currentFormat) => (
                 <Button
                   type="button"
                   variant="ghost"
                   disabled={
                     !billing.isPro ||
                     (!isCustomized &&
-                      promptsMatch(currentPrompt, defaultPrompt)) ||
+                      formatsMatch(currentFormat, defaultFormat)) ||
                     saveMutation.isPending
                   }
                   onClick={() => {
                     void resetToDefault().catch(() => {});
                   }}
                 >
-                  <Trans>Reset to Anarlog default</Trans>
+                  <Trans>Reset to default format</Trans>
                 </Button>
               )}
             </form.Subscribe>
@@ -331,22 +297,75 @@ export function AutoPromptForm({
           </div>
         </div>
       </div>
+
+      {showExamplesDialog ? (
+        <AutoFormatExamplesDialog
+          onClose={() => setShowExamplesDialog(false)}
+          onGenerated={(format) => {
+            form.setFieldValue("format", format);
+            editorRef.current?.setValue(format);
+          }}
+        />
+      ) : null}
     </form>
   );
 }
 
-async function loadDefaultAutoPrompt(): Promise<string> {
-  const result = await templateCommands.getTemplateSource("enhanceSystem");
+async function loadDefaultAutoFormat(): Promise<string> {
+  const result = await templateCommands.getTemplateSource("enhanceFormat");
   if (result.status === "error") {
     throw new Error(result.error);
   }
   return result.data;
 }
 
-function normalizePrompt(value: string): string {
+function normalizeFormat(value: string): string {
   return value.replace(/\r\n/g, "\n").trim();
 }
 
-function promptsMatch(a: string, b: string): boolean {
-  return normalizePrompt(a) === normalizePrompt(b);
+function formatsMatch(a: string, b: string): boolean {
+  return normalizeFormat(a) === normalizeFormat(b);
+}
+
+function normalizeFormatOverride(value: string): string {
+  const normalized = normalizeFormat(value);
+  if (
+    !normalized.includes("# General Instructions") ||
+    !normalized.includes("# About Notes")
+  ) {
+    return normalized;
+  }
+
+  const formatRequirements = headingSection(
+    normalized,
+    "# Format Requirements",
+  );
+  if (formatRequirements === null) {
+    return normalized;
+  }
+
+  const customInstructions = headingSection(
+    normalized,
+    "# Custom Summary Instructions",
+  )
+    ?.replace(LEGACY_CUSTOM_INSTRUCTIONS_PREAMBLE, "")
+    .trim();
+
+  return [formatRequirements, customInstructions].filter(Boolean).join("\n\n");
+}
+
+function headingSection(source: string, heading: string): string | null {
+  const lines = source.split("\n");
+  const headingIndex = lines.findIndex((line) => line.trim() === heading);
+  if (headingIndex === -1) return null;
+
+  const followingLines = lines.slice(headingIndex + 1);
+  const nextHeadingIndex = followingLines.findIndex((line) =>
+    line.trimStart().startsWith("# "),
+  );
+
+  return followingLines
+    .slice(0, nextHeadingIndex === -1 ? undefined : nextHeadingIndex)
+    .join("\n")
+    .trim();
 }
