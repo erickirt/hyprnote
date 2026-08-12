@@ -1745,6 +1745,7 @@ msgid "Loading teams…"
 msgstr "Loading teams…"
 
 #: src/changelog/index.tsx
+#: src/contacts/details.tsx
 #: src/task/resource-view.tsx
 msgid "Loading..."
 msgstr "Loading..."
@@ -3147,6 +3148,7 @@ msgstr "Summary format"
 msgid "Summary format cannot be empty."
 msgstr "Summary format cannot be empty."
 
+#: src/contacts/details.tsx
 #: src/session/components/note-input/enhanced/enhance-error.tsx
 msgid "Summary generation failed"
 msgstr "Summary generation failed"
@@ -3361,6 +3363,7 @@ msgstr "Trial activated - {trialDays} days of Pro"
 msgid "Trigger"
 msgstr "Trigger"
 
+#: src/contacts/details.tsx
 #: src/onboarding/permissions.tsx
 #: src/session-sharing/management-panel.tsx
 #: src/settings/general/permissions.tsx
