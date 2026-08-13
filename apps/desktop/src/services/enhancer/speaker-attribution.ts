@@ -108,18 +108,19 @@ export async function inferAutomaticSpeakerAssignments({
     [...clustersByTranscript.entries()].map(
       async ([transcriptId, clusters]) => {
         const directMappings: SpeakerAttributionMapping[] = [];
-        const useApplePublicEvidenceFallback =
-          isAppleFoundationModel(model) &&
+        const usePublicEvidenceFallback =
           context.candidates.length === 2 &&
           clusters.length === 2 &&
           candidates.every(
             (candidate) => candidate.summaryMentions.length === 0,
-          );
+          ) &&
+          (isAppleFoundationModel(model) ||
+            hasTwoGenericSpeakerLabels(generatedSummary));
 
         for (const candidate of candidates) {
           if (
             candidate.summaryMentions.length === 0 &&
-            !useApplePublicEvidenceFallback
+            !usePublicEvidenceFallback
           ) {
             continue;
           }
@@ -216,6 +217,14 @@ function formatSpeakerAttributionPrompt(
   return isAppleFoundationModel(model)
     ? `Here is the U.S. English meeting data to evaluate:\n${json}`
     : json;
+}
+
+function hasTwoGenericSpeakerLabels(summary: string): boolean {
+  return (
+    new Set(
+      [...summary.matchAll(/\bspeaker\s+(\d+)\b/giu)].map((match) => match[1]),
+    ).size === 2
+  );
 }
 
 function buildSpeakerAttributionContext(
