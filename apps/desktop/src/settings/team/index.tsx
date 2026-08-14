@@ -2,6 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import {
   CircleNotch,
   Crown,
+  LockSimple,
   Plus,
   Trash,
   UserPlus,
@@ -40,10 +41,12 @@ import {
 import { MY_WORKSPACES_QUERY_KEY, useMyWorkspacesWithMirror } from "./mirror";
 
 import { useAuth } from "~/auth";
+import { useBillingAccess } from "~/auth/billing-context";
 import { SettingsPageTitle } from "~/settings/page-title";
 
 export function SettingsTeam() {
   const auth = useAuth();
+  const billing = useBillingAccess();
   const { t } = useLingui();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -81,6 +84,54 @@ export function SettingsTeam() {
     );
   }
 
+  if (!billing.isReady) {
+    return (
+      <div className="flex flex-col gap-8">
+        <SettingsPageTitle title={<Trans>Team</Trans>} />
+        <TeamSkeleton />
+      </div>
+    );
+  }
+
+  if (
+    !billing.isPro &&
+    !workspaces.isPending &&
+    (!workspaces.data || workspaces.data.length === 0)
+  ) {
+    return (
+      <div className="flex flex-col gap-8">
+        <SettingsPageTitle title={<Trans>Team</Trans>} />
+        <div className="flex max-w-2xl items-start justify-between gap-6">
+          <div className="flex gap-3">
+            <LockSimple className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+            <div>
+              <h3 className="text-sm font-medium">
+                <Trans>Anarlog Pro required</Trans>
+              </h3>
+              <p className="text-muted-foreground mt-1 text-xs leading-5">
+                <Trans>
+                  Invite teammates, share notes across the workspace, and manage
+                  who has access. Your personal notes stay private.
+                </Trans>
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            onClick={billing.upgradeToPro}
+            disabled={billing.isUpgradingToPro}
+          >
+            {billing.isUpgradingToPro ? (
+              <CircleNotch className="size-4 animate-spin" />
+            ) : null}
+            <Trans>Upgrade to Pro</Trans>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-8">
       <SettingsPageTitle title={<Trans>Team</Trans>} />
@@ -114,6 +165,8 @@ export function SettingsTeam() {
               key={activeId}
               workspaceId={activeId}
               workspaceName={activeWorkspace?.name ?? ""}
+              workspaceRole={activeWorkspace?.role ?? "member"}
+              hasProAccess={billing.isPro}
               onWorkspaceRenamed={() => {
                 void queryClient.invalidateQueries({
                   queryKey: [MY_WORKSPACES_QUERY_KEY],
@@ -196,11 +249,15 @@ function CreateWorkspaceForm({
 function WorkspacePanel({
   workspaceId,
   workspaceName,
+  workspaceRole,
+  hasProAccess,
   onWorkspaceRenamed,
   onWorkspaceLeft,
 }: {
   workspaceId: string;
   workspaceName: string;
+  workspaceRole: WorkspaceRole;
+  hasProAccess: boolean;
   // Renaming keeps the panel where it is; leaving or deleting must drop the
   // selection because the workspace is gone.
   onWorkspaceRenamed: () => void;
@@ -290,10 +347,9 @@ function WorkspacePanel({
   });
 
   const viewerId = auth.session?.user.id;
-  const viewerRole = members.data?.find(
-    (member) => member.userId === viewerId,
-  )?.role;
-  const canManage = viewerRole === "owner" || viewerRole === "admin";
+  const viewerRole = workspaceRole;
+  const canManage =
+    hasProAccess && (viewerRole === "owner" || viewerRole === "admin");
   const trimmedEmail = email.trim();
   const actionError =
     invite.error?.message ??
@@ -386,7 +442,7 @@ function WorkspacePanel({
               key={member.userId}
               member={member}
               isViewer={member.userId === viewerId}
-              viewerRole={viewerRole}
+              viewerRole={canManage ? viewerRole : undefined}
               onRoleChange={(role) =>
                 changeRole.mutate({ userId: member.userId, role })
               }

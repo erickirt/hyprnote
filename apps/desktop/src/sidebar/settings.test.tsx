@@ -136,6 +136,7 @@ describe("SettingsNav", () => {
       "General",
       "Appearance",
       "Account",
+      "Team",
       "Notifications",
       "Workspace",
       "Meetings",
@@ -296,6 +297,19 @@ describe("SettingsNav", () => {
       expect(mocks.updateSettingsTabState).not.toHaveBeenCalled();
     },
   );
+
+  it("opens Team navigation for non-Pro members", () => {
+    mocks.isPro = false;
+
+    render(<SettingsNav />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Team" }));
+
+    expect(mocks.updateSettingsTabState).toHaveBeenCalledWith(
+      mocks.currentTab,
+      { tab: "team" },
+    );
+  });
 
   it("opens Imports inside settings", () => {
     render(<SettingsNav />);
