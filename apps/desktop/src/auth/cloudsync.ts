@@ -32,6 +32,7 @@ import { flushCloudsyncSessionEvictions } from "./cloudsync-session-evictions";
 import { requestCloudsyncCredentials } from "./cloudsync-token-exchange";
 
 import { resolveConfigValue } from "~/shared/config";
+import { isKeychainAccessError } from "~/shared/keychain";
 
 export {
   getCloudsyncCredentialBlock,
@@ -838,20 +839,23 @@ async function activateCloudsync(
       return "ok";
     }
     encryptionKeyId = identity.keyId;
-  } catch {
+  } catch (error) {
     if (isCleanupSuspendRequired()) {
       await suspendCloudsyncPreemptivelyForGeneration(activeGeneration);
       scheduleReactivation();
       return "ok";
     }
+    const keychainAccessError = isKeychainAccessError(error);
     if (activeGeneration === generation) {
-      setCredentialBlock("unavailable");
+      setCredentialBlock(
+        keychainAccessError ? "keychain_access" : "unavailable",
+      );
     }
     await suspendCloudsyncAfterCredentialRejection(activeGeneration);
     console.warn(
       "[cloudsync] E2EE recovery key is unavailable; sync remains disabled",
     );
-    if (activeGeneration === generation) {
+    if (activeGeneration === generation && !keychainAccessError) {
       scheduleExchange(
         session,
         activeGeneration,

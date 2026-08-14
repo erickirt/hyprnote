@@ -267,6 +267,24 @@ describe("CloudSync auth lifecycle", () => {
     expect(getCloudsyncCredentialBlock()).toBe("setup_required");
   });
 
+  test("surfaces macOS Keychain access failures separately", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(getE2eeIdentityStatus).mockRejectedValue(
+      "macOS couldn't access your login Keychain. Use “Repair Keychain Access” below, then try again.",
+    );
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await handleCloudsyncAuthChange("SIGNED_IN", session());
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(configureCloudsyncToken).not.toHaveBeenCalled();
+    expect(suspendCloudsync).toHaveBeenCalledTimes(1);
+    expect(getE2eeIdentityStatus).toHaveBeenCalledTimes(1);
+    expect(getCloudsyncCredentialBlock()).toBe("keychain_access");
+  });
+
   test("polls only native status while CloudSync activity is paused", async () => {
     const fetchMock = vi.fn(() => Promise.resolve(credentialsResponse()));
     vi.stubGlobal("fetch", fetchMock);
