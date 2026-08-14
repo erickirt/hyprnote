@@ -18437,7 +18437,10 @@ dependencies = [
 name = "tauri-plugin-dictation"
 version = "0.1.0"
 dependencies = [
+ "audio",
  "dictation-ui-macos",
+ "futures-util",
+ "hound",
  "serde",
  "specta",
  "specta-typescript",
@@ -18445,7 +18448,10 @@ dependencies = [
  "tauri-plugin",
  "tauri-plugin-shortcut",
  "tauri-specta",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
  "tracing",
 ]
 
