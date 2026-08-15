@@ -1,6 +1,112 @@
 use super::*;
 
 #[tokio::test]
+async fn rotated_keyring_applies_new_writes_over_an_old_snapshot() {
+    let recovery =
+        RecoveryKey::parse("anarlog-e2ee-v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc").unwrap();
+    let old_key = recovery.workspace_key("workspace-a").unwrap();
+    let old_keys = HashMap::from([(
+        "workspace-a".to_string(),
+        anlg_e2ee::WorkspaceKeyring::new(old_key.clone()),
+    )]);
+    let source = test_db().await;
+    sqlx::query(
+        "INSERT INTO sessions (id, workspace_id, owner_user_id, title)
+             VALUES ('session-1', 'workspace-a', 'user-a', 'Before rotation')",
+    )
+    .execute(source.pool())
+    .await
+    .unwrap();
+    encrypt_e2ee_replica_changes(source.pool(), &old_keys)
+        .await
+        .unwrap();
+
+    let target = test_db().await;
+    copy_replica(source.pool(), target.pool()).await;
+    apply_e2ee_replica_changes(target.pool(), &old_keys)
+        .await
+        .unwrap();
+
+    let new_key = anlg_e2ee::WorkspaceKey::generate().unwrap();
+    let old_title_id = old_key.blind_field_id("sessions", "session-1", "title");
+    let new_title_id = new_key.blind_field_id("sessions", "session-1", "title");
+    let mut rotated_keyring = anlg_e2ee::WorkspaceKeyring::new(new_key);
+    rotated_keyring.insert_retired(old_key);
+    let rotated_keys = HashMap::from([("workspace-a".to_string(), rotated_keyring)]);
+
+    sqlx::query("UPDATE sessions SET title = 'After rotation' WHERE id = 'session-1'")
+        .execute(source.pool())
+        .await
+        .unwrap();
+    encrypt_e2ee_replica_changes(source.pool(), &rotated_keys)
+        .await
+        .unwrap();
+    copy_replica(source.pool(), target.pool()).await;
+    let stats = apply_e2ee_replica_changes(target.pool(), &rotated_keys)
+        .await
+        .unwrap();
+
+    let title: String = sqlx::query_scalar("SELECT title FROM sessions WHERE id = 'session-1'")
+        .fetch_one(target.pool())
+        .await
+        .unwrap();
+    let title_generations: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM e2ee_records WHERE id IN (?, ?)")
+            .bind(old_title_id)
+            .bind(new_title_id)
+            .fetch_one(target.pool())
+            .await
+            .unwrap();
+    assert_eq!(title, "After rotation");
+    assert_eq!(title_generations, 2);
+    assert_eq!(stats.skipped_local_changes, 0);
+}
+
+#[tokio::test]
+async fn rotated_keyring_authenticates_witness_history_from_a_retired_generation() {
+    let db = test_db().await;
+    let recovery =
+        RecoveryKey::parse("anarlog-e2ee-v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc").unwrap();
+    let old_key = recovery.workspace_key("workspace-a").unwrap();
+    let sealed = old_key
+        .seal_field(
+            "workspace-a",
+            "sessions",
+            "session-1",
+            "title",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            1,
+            false,
+            serde_json::json!("Before rotation"),
+        )
+        .unwrap();
+    let event = E2eeWitnessEvent {
+        sequence: 1,
+        record_id: sealed.record_id,
+        workspace_id: "workspace-a".to_string(),
+        payload_hash: anlg_e2ee::payload_hash(&sealed.payload),
+        payload: sealed.payload,
+    };
+    let mut keyring =
+        anlg_e2ee::WorkspaceKeyring::new(anlg_e2ee::WorkspaceKey::generate().unwrap());
+    keyring.insert_retired(old_key);
+
+    merge_e2ee_witness_events_with_keyring(db.pool(), &keyring, "workspace-a", &[event])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM e2ee_witness_records WHERE workspace_id = 'workspace-a'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn fresh_device_does_not_materialize_an_unwitnessed_snapshot() {
     let workspace_keys = keys("workspace-a");
     let source = test_db().await;

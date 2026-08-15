@@ -73,6 +73,7 @@ vi.mock("@anlg/ui/components/ui/toast", () => ({
 
 const NOW = new Date("2026-07-13T00:00:00Z");
 const E2EE_KEY_ID = "abcdefghijklmnopqrstuv";
+const E2EE_MEMBER_PUBLIC_KEY = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq";
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -191,6 +192,16 @@ function projectedCredentialsPayload() {
         updatedAt: "2026-07-15T00:00:00Z",
       },
     ],
+    workspaceKeyGrants: [
+      {
+        workspaceId: "workspace-shared",
+        keyId: "AAAAAAAAAAAAAAAAAAAAAA",
+        ephemeralPublicKey: "A".repeat(43),
+        nonce: "B".repeat(32),
+        ciphertext: "C".repeat(64),
+        isActive: true,
+      },
+    ],
   };
 }
 
@@ -222,6 +233,7 @@ describe("CloudSync auth lifecycle", () => {
     vi.mocked(getE2eeIdentityStatus).mockResolvedValue({
       configured: true,
       keyId: E2EE_KEY_ID,
+      memberPublicKey: E2EE_MEMBER_PUBLIC_KEY,
     });
     vi.mocked(fsSyncCommands.deleteSessionFolder).mockResolvedValue({
       status: "ok",
@@ -274,6 +286,7 @@ describe("CloudSync auth lifecycle", () => {
     vi.mocked(getE2eeIdentityStatus).mockResolvedValue({
       configured: false,
       keyId: null,
+      memberPublicKey: null,
     });
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -439,6 +452,7 @@ describe("CloudSync auth lifecycle", () => {
         headers: {
           Authorization: "Bearer supabase-token",
           "X-Anarlog-E2EE-Key-Id": E2EE_KEY_ID,
+          "x-anarlog-e2ee-member-public-key": E2EE_MEMBER_PUBLIC_KEY,
         },
       }),
     );
@@ -516,7 +530,34 @@ describe("CloudSync auth lifecycle", () => {
           }),
         ],
       },
+      [
+        {
+          workspaceId: "workspace-shared",
+          keyId: "AAAAAAAAAAAAAAAAAAAAAA",
+          ephemeralPublicKey: "A".repeat(43),
+          nonce: "B".repeat(32),
+          ciphertext: "C".repeat(64),
+          isActive: true,
+        },
+      ],
     );
+  });
+
+  test("rejects shared workspace credentials without an active key grant", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          projectedCredentialsResponse((payload) => {
+            payload.workspaceKeyGrants[0]!.isActive = false;
+          }),
+        ),
+      ),
+    );
+
+    await handleCloudsyncAuthChange("SIGNED_IN", session());
+
+    expect(configureCloudsyncToken).not.toHaveBeenCalled();
   });
 
   test("deletes queued folders only after native revocation succeeds", async () => {
@@ -1650,7 +1691,11 @@ describe("CloudSync auth lifecycle", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(configureCloudsyncToken).not.toHaveBeenCalled();
 
-    identity.resolve({ configured: true, keyId: E2EE_KEY_ID });
+    identity.resolve({
+      configured: true,
+      keyId: E2EE_KEY_ID,
+      memberPublicKey: E2EE_MEMBER_PUBLIC_KEY,
+    });
     await identity.promise;
     await vi.advanceTimersByTimeAsync(0);
 
@@ -1677,7 +1722,11 @@ describe("CloudSync auth lifecycle", () => {
     await vi.advanceTimersByTimeAsync(25 * 1000);
     await activation;
 
-    identity.resolve({ configured: true, keyId: E2EE_KEY_ID });
+    identity.resolve({
+      configured: true,
+      keyId: E2EE_KEY_ID,
+      memberPublicKey: E2EE_MEMBER_PUBLIC_KEY,
+    });
     await identity.promise;
     await vi.advanceTimersByTimeAsync(0);
 

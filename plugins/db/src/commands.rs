@@ -219,9 +219,22 @@ pub(crate) async fn get_e2ee_identity_status<R: tauri::Runtime>(
     account_user_id: String,
 ) -> Result<crate::E2eeIdentityStatus, String> {
     let recovery_key = load_e2ee_recovery_key(app, &account_user_id).await?;
+    let (key_id, member_public_key) = match recovery_key {
+        Some(recovery_key) => (
+            Some(recovery_key.key_id()),
+            Some(
+                recovery_key
+                    .member_identity_key()
+                    .map_err(|error| error.to_string())?
+                    .public_key(),
+            ),
+        ),
+        None => (None, None),
+    };
     Ok(crate::E2eeIdentityStatus {
-        configured: recovery_key.is_some(),
-        key_id: recovery_key.map(|key| key.key_id()),
+        configured: key_id.is_some(),
+        key_id,
+        member_public_key,
     })
 }
 
@@ -346,6 +359,108 @@ pub(crate) async fn seal_e2ee_recovery_key_for_device<R: tauri::Runtime>(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn seal_workspace_e2ee_key_for_recipients<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, ManagedState>,
+    account_user_id: String,
+    workspace_id: String,
+    recipients: Vec<crate::WorkspaceE2eeKeyRecipient>,
+    rotate: bool,
+    source_grant: Option<crate::CloudsyncWorkspaceKeyGrant>,
+) -> Result<crate::SealedWorkspaceE2eeKey, String> {
+    let account_user_id = canonical_e2ee_account_user_id(&account_user_id)?;
+    let workspace_id = uuid::Uuid::parse_str(workspace_id.trim())
+        .map(|workspace_id| workspace_id.to_string())
+        .map_err(|_| "E2EE workspace ID is invalid".to_string())?;
+    if recipients.is_empty() || recipients.len() > 256 {
+        return Err("workspace E2EE recipients are invalid".to_string());
+    }
+
+    let key = if rotate {
+        anlg_e2ee::WorkspaceKey::generate().map_err(|error| error.to_string())
+    } else {
+        match state.workspace_key(&workspace_id) {
+            Some(key) => Ok(key),
+            None => {
+                let source_grant = source_grant
+                    .ok_or_else(|| "workspace E2EE source grant is invalid".to_string())?;
+                let recovery_key = load_e2ee_recovery_key(app, &account_user_id)
+                    .await?
+                    .ok_or_else(|| "E2EE recovery key is not configured".to_string())?;
+                open_workspace_e2ee_source_key(
+                    &recovery_key,
+                    &account_user_id,
+                    &workspace_id,
+                    source_grant,
+                )
+            }
+        }
+    }?;
+    seal_workspace_e2ee_key(key, &account_user_id, &workspace_id, recipients)
+}
+
+fn open_workspace_e2ee_source_key(
+    recovery_key: &anlg_e2ee::RecoveryKey,
+    account_user_id: &str,
+    workspace_id: &str,
+    source_grant: crate::CloudsyncWorkspaceKeyGrant,
+) -> Result<anlg_e2ee::WorkspaceKey, String> {
+    if source_grant.workspace_id != workspace_id || !source_grant.is_active {
+        return Err("workspace E2EE source grant is invalid".to_string());
+    }
+    recovery_key
+        .member_identity_key()
+        .and_then(|identity| {
+            identity.open_workspace_key(workspace_id, account_user_id, &source_grant.into())
+        })
+        .map_err(|error| error.to_string())
+}
+
+fn seal_workspace_e2ee_key(
+    key: anlg_e2ee::WorkspaceKey,
+    account_user_id: &str,
+    workspace_id: &str,
+    recipients: Vec<crate::WorkspaceE2eeKeyRecipient>,
+) -> Result<crate::SealedWorkspaceE2eeKey, String> {
+    if recipients.is_empty() || recipients.len() > 256 {
+        return Err("workspace E2EE recipients are invalid".to_string());
+    }
+    let mut recipient_ids = std::collections::HashSet::with_capacity(recipients.len());
+    if recipients.iter().any(|recipient| {
+        uuid::Uuid::parse_str(recipient.user_id.trim()).is_err()
+            || !recipient_ids.insert(recipient.user_id.trim())
+    }) || !recipient_ids.contains(account_user_id)
+    {
+        return Err("workspace E2EE recipients are invalid".to_string());
+    }
+
+    let key_id = key.key_id().to_string();
+    let grants = recipients
+        .into_iter()
+        .map(|recipient| {
+            let user_id = uuid::Uuid::parse_str(recipient.user_id.trim())
+                .expect("recipient IDs were validated")
+                .to_string();
+            let grant = anlg_e2ee::seal_workspace_key_for_member(
+                &key,
+                &recipient.public_key,
+                &workspace_id,
+                &user_id,
+            )
+            .map_err(|error| error.to_string())?;
+            Ok(crate::WorkspaceE2eeKeyGrantUpload {
+                user_id,
+                ephemeral_public_key: grant.ephemeral_public_key,
+                nonce: grant.nonce,
+                ciphertext: grant.ciphertext,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(crate::SealedWorkspaceE2eeKey { key_id, grants })
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn import_e2ee_device_enrollment<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     account_user_id: String,
@@ -434,6 +549,7 @@ pub(crate) async fn configure_cloudsync_token<R: tauri::Runtime>(
     token: String,
     workspace_id: String,
     workspace_projection: Option<crate::CloudsyncWorkspaceProjection>,
+    workspace_key_grants: Option<Vec<crate::CloudsyncWorkspaceKeyGrant>>,
     e2ee_witness: crate::CloudsyncE2eeWitness,
 ) -> Result<crate::CloudsyncTokenConfigurationResult, String> {
     let auth_generation = state.begin_cloudsync_auth_configuration();
@@ -447,6 +563,19 @@ pub(crate) async fn configure_cloudsync_token<R: tauri::Runtime>(
             "end-to-end encryption recovery key setup is required before CloudSync can start"
                 .to_string()
         })?;
+    let shared_workspace_ids = workspace_projection
+        .as_ref()
+        .into_iter()
+        .flat_map(|projection| projection.workspaces.iter())
+        .filter(|workspace| workspace.kind == "shared")
+        .map(|workspace| workspace.id.clone())
+        .collect();
+    let shared_keyrings = open_shared_workspace_keyrings(
+        &recovery_key,
+        &workspace_id,
+        shared_workspace_ids,
+        workspace_key_grants.unwrap_or_default(),
+    )?;
     state
         .configure_cloudsync_token_with_projection_at_generation(
             crate::runtime::CloudsyncTokenConfiguration::new(
@@ -456,11 +585,75 @@ pub(crate) async fn configure_cloudsync_token<R: tauri::Runtime>(
                 workspace_projection.map(Into::into),
                 e2ee_witness,
             ),
-            Some((personal_workspace_id, recovery_key)),
+            Some(crate::runtime::E2eeWorkspaceKeyConfiguration::new(
+                personal_workspace_id,
+                recovery_key,
+                shared_keyrings,
+            )),
             auth_generation,
         )
         .await
         .map_err(|error| error.to_string())
+}
+
+fn open_shared_workspace_keyrings(
+    recovery_key: &anlg_e2ee::RecoveryKey,
+    account_user_id: &str,
+    shared_workspace_ids: std::collections::HashSet<String>,
+    grants: Vec<crate::CloudsyncWorkspaceKeyGrant>,
+) -> Result<std::collections::HashMap<String, anlg_e2ee::WorkspaceKeyring>, String> {
+    struct PendingKeyring {
+        active: Option<anlg_e2ee::WorkspaceKey>,
+        retired: Vec<anlg_e2ee::WorkspaceKey>,
+        key_ids: std::collections::HashSet<String>,
+    }
+
+    let member_identity = recovery_key
+        .member_identity_key()
+        .map_err(|error| error.to_string())?;
+    let mut pending = std::collections::HashMap::<String, PendingKeyring>::new();
+    for grant in grants {
+        if !shared_workspace_ids.contains(&grant.workspace_id) {
+            return Err("workspace E2EE grant targets an unavailable workspace".to_string());
+        }
+        let workspace_id = grant.workspace_id.clone();
+        let is_active = grant.is_active;
+        let key_id = grant.key_id.clone();
+        let key = member_identity
+            .open_workspace_key(&workspace_id, account_user_id, &grant.into())
+            .map_err(|error| error.to_string())?;
+        let keyring = pending
+            .entry(workspace_id)
+            .or_insert_with(|| PendingKeyring {
+                active: None,
+                retired: Vec::new(),
+                key_ids: std::collections::HashSet::new(),
+            });
+        if !keyring.key_ids.insert(key_id) || (is_active && keyring.active.is_some()) {
+            return Err("workspace E2EE grant generations are invalid".to_string());
+        }
+        if is_active {
+            keyring.active = Some(key);
+        } else {
+            keyring.retired.push(key);
+        }
+    }
+
+    let mut keyrings = std::collections::HashMap::with_capacity(shared_workspace_ids.len());
+    for workspace_id in shared_workspace_ids {
+        let Some(pending) = pending.remove(&workspace_id) else {
+            return Err("shared workspace E2EE key is unavailable".to_string());
+        };
+        let Some(active) = pending.active else {
+            return Err("shared workspace active E2EE key is unavailable".to_string());
+        };
+        let mut keyring = anlg_e2ee::WorkspaceKeyring::new(active);
+        for key in pending.retired {
+            keyring.insert_retired(key);
+        }
+        keyrings.insert(workspace_id, keyring);
+    }
+    Ok(keyrings)
 }
 
 #[tauri::command]
@@ -601,6 +794,30 @@ pub(crate) async fn end_cloudsync_activity(
 mod tests {
     use super::*;
 
+    fn grant(
+        recovery_key: &anlg_e2ee::RecoveryKey,
+        workspace_id: &str,
+        account_user_id: &str,
+        key: &anlg_e2ee::WorkspaceKey,
+        is_active: bool,
+    ) -> crate::CloudsyncWorkspaceKeyGrant {
+        let sealed = anlg_e2ee::seal_workspace_key_for_member(
+            key,
+            &recovery_key.member_identity_key().unwrap().public_key(),
+            workspace_id,
+            account_user_id,
+        )
+        .unwrap();
+        crate::CloudsyncWorkspaceKeyGrant {
+            workspace_id: workspace_id.to_string(),
+            key_id: sealed.key_id,
+            ephemeral_public_key: sealed.ephemeral_public_key,
+            nonce: sealed.nonce,
+            ciphertext: sealed.ciphertext,
+            is_active,
+        }
+    }
+
     #[tokio::test]
     async fn e2ee_secret_read_timeout_is_bounded() {
         let error = read_e2ee_secret_with_timeout(
@@ -622,6 +839,198 @@ mod tests {
         assert_eq!(
             canonical_e2ee_request_id(" 6BA7B810-9DAD-11D1-80B4-00C04FD430C8 ").unwrap(),
             "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+        );
+    }
+
+    #[test]
+    fn opens_active_and_retired_shared_workspace_grants() {
+        let recovery_key = anlg_e2ee::RecoveryKey::generate().unwrap();
+        let retired = anlg_e2ee::WorkspaceKey::generate().unwrap();
+        let active = anlg_e2ee::WorkspaceKey::generate().unwrap();
+        let retired_key_id = retired.key_id().to_string();
+        let active_key_id = active.key_id().to_string();
+
+        let keyrings = open_shared_workspace_keyrings(
+            &recovery_key,
+            "user-a",
+            std::collections::HashSet::from(["workspace-shared".to_string()]),
+            vec![
+                grant(&recovery_key, "workspace-shared", "user-a", &retired, false),
+                grant(&recovery_key, "workspace-shared", "user-a", &active, true),
+            ],
+        )
+        .unwrap();
+
+        let keyring = &keyrings["workspace-shared"];
+        assert_eq!(keyring.active().key_id(), active_key_id);
+        assert!(keyring.get(&retired_key_id).is_some());
+    }
+
+    #[test]
+    fn shared_workspace_grants_fail_closed() {
+        let recovery_key = anlg_e2ee::RecoveryKey::generate().unwrap();
+        let key = anlg_e2ee::WorkspaceKey::generate().unwrap();
+        let workspace_ids = std::collections::HashSet::from(["workspace-shared".to_string()]);
+
+        assert!(
+            open_shared_workspace_keyrings(
+                &recovery_key,
+                "user-a",
+                workspace_ids.clone(),
+                Vec::new(),
+            )
+            .is_err()
+        );
+        assert!(
+            open_shared_workspace_keyrings(
+                &recovery_key,
+                "user-a",
+                workspace_ids.clone(),
+                vec![grant(
+                    &recovery_key,
+                    "workspace-shared",
+                    "user-a",
+                    &key,
+                    false,
+                )],
+            )
+            .is_err()
+        );
+        assert!(
+            open_shared_workspace_keyrings(
+                &recovery_key,
+                "user-b",
+                workspace_ids,
+                vec![grant(
+                    &recovery_key,
+                    "workspace-shared",
+                    "user-a",
+                    &key,
+                    true,
+                )],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn seals_one_workspace_key_for_each_recipient_identity() {
+        const OWNER: &str = "11111111-1111-4111-8111-111111111111";
+        const MEMBER: &str = "22222222-2222-4222-8222-222222222222";
+        const WORKSPACE: &str = "33333333-3333-4333-8333-333333333333";
+        let owner_recovery = anlg_e2ee::RecoveryKey::generate().unwrap();
+        let member_recovery = anlg_e2ee::RecoveryKey::generate().unwrap();
+        let key = anlg_e2ee::WorkspaceKey::generate().unwrap();
+        let expected_key_id = key.key_id().to_string();
+
+        let sealed = seal_workspace_e2ee_key(
+            key,
+            OWNER,
+            WORKSPACE,
+            vec![
+                crate::WorkspaceE2eeKeyRecipient {
+                    user_id: OWNER.to_string(),
+                    public_key: owner_recovery.member_identity_key().unwrap().public_key(),
+                },
+                crate::WorkspaceE2eeKeyRecipient {
+                    user_id: MEMBER.to_string(),
+                    public_key: member_recovery.member_identity_key().unwrap().public_key(),
+                },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(sealed.key_id, expected_key_id);
+        for (recovery_key, user_id, upload) in [
+            (&owner_recovery, OWNER, &sealed.grants[0]),
+            (&member_recovery, MEMBER, &sealed.grants[1]),
+        ] {
+            let opened = recovery_key
+                .member_identity_key()
+                .unwrap()
+                .open_workspace_key(
+                    WORKSPACE,
+                    user_id,
+                    &anlg_e2ee::WorkspaceKeyGrant {
+                        key_id: sealed.key_id.clone(),
+                        ephemeral_public_key: upload.ephemeral_public_key.clone(),
+                        nonce: upload.nonce.clone(),
+                        ciphertext: upload.ciphertext.clone(),
+                    },
+                )
+                .unwrap();
+            assert_eq!(opened.key_id(), expected_key_id);
+        }
+    }
+
+    #[test]
+    fn sealing_workspace_keys_requires_the_issuer_and_unique_recipients() {
+        const OWNER: &str = "11111111-1111-4111-8111-111111111111";
+        const MEMBER: &str = "22222222-2222-4222-8222-222222222222";
+        const WORKSPACE: &str = "33333333-3333-4333-8333-333333333333";
+        let recovery_key = anlg_e2ee::RecoveryKey::generate().unwrap();
+        let recipient = crate::WorkspaceE2eeKeyRecipient {
+            user_id: MEMBER.to_string(),
+            public_key: recovery_key.member_identity_key().unwrap().public_key(),
+        };
+
+        assert!(
+            seal_workspace_e2ee_key(
+                anlg_e2ee::WorkspaceKey::generate().unwrap(),
+                OWNER,
+                WORKSPACE,
+                vec![recipient.clone()],
+            )
+            .is_err()
+        );
+        assert!(
+            seal_workspace_e2ee_key(
+                anlg_e2ee::WorkspaceKey::generate().unwrap(),
+                MEMBER,
+                WORKSPACE,
+                vec![recipient.clone(), recipient],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn opens_an_active_source_grant_after_runtime_keys_are_lost() {
+        const OWNER: &str = "11111111-1111-4111-8111-111111111111";
+        const WORKSPACE: &str = "33333333-3333-4333-8333-333333333333";
+        let recovery_key = anlg_e2ee::RecoveryKey::generate().unwrap();
+        let key = anlg_e2ee::WorkspaceKey::generate().unwrap();
+        let expected_key_id = key.key_id().to_string();
+        let grant = anlg_e2ee::seal_workspace_key_for_member(
+            &key,
+            &recovery_key.member_identity_key().unwrap().public_key(),
+            WORKSPACE,
+            OWNER,
+        )
+        .unwrap();
+        let source_grant = crate::CloudsyncWorkspaceKeyGrant {
+            workspace_id: WORKSPACE.to_string(),
+            key_id: grant.key_id,
+            ephemeral_public_key: grant.ephemeral_public_key,
+            nonce: grant.nonce,
+            ciphertext: grant.ciphertext,
+            is_active: true,
+        };
+
+        assert_eq!(
+            open_workspace_e2ee_source_key(&recovery_key, OWNER, WORKSPACE, source_grant.clone(),)
+                .unwrap()
+                .key_id(),
+            expected_key_id,
+        );
+        assert!(
+            open_workspace_e2ee_source_key(
+                &recovery_key,
+                "22222222-2222-4222-8222-222222222222",
+                WORKSPACE,
+                source_grant,
+            )
+            .is_err()
         );
     }
 }

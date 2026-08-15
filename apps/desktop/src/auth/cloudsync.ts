@@ -30,6 +30,7 @@ import {
 } from "./cloudsync-progress";
 import { flushCloudsyncSessionEvictions } from "./cloudsync-session-evictions";
 import { requestCloudsyncCredentials } from "./cloudsync-token-exchange";
+import { provisionMissingWorkspaceKeys } from "./cloudsync-workspace-keys";
 
 import { resolveConfigValue } from "~/shared/config";
 import { isKeychainAccessError } from "~/shared/keychain";
@@ -786,6 +787,7 @@ async function activateCloudsync(
   }
 
   let encryptionKeyId: string;
+  let memberPublicKey: string;
   try {
     const identityRead = await settleCloudsyncOperationWithin(
       readE2eeIdentity(session.user.id),
@@ -821,7 +823,9 @@ async function activateCloudsync(
     if (
       !identity.configured ||
       !identity.keyId ||
-      !/^[A-Za-z0-9_-]{22}$/.test(identity.keyId)
+      !/^[A-Za-z0-9_-]{22}$/.test(identity.keyId) ||
+      !identity.memberPublicKey ||
+      !/^[A-Za-z0-9_-]{43}$/.test(identity.memberPublicKey)
     ) {
       setCredentialBlock("setup_required");
       await suspendCloudsyncAfterCredentialRejection(activeGeneration);
@@ -831,6 +835,7 @@ async function activateCloudsync(
       return "ok";
     }
     encryptionKeyId = identity.keyId;
+    memberPublicKey = identity.memberPublicKey;
   } catch (error) {
     if (isCleanupSuspendRequired()) {
       await suspendCloudsyncPreemptivelyForGeneration(activeGeneration);
@@ -913,6 +918,7 @@ async function activateCloudsync(
     accessToken: session.access_token,
     cloudsyncExtensionAvailable: status.extension_loaded,
     encryptionKeyId,
+    memberPublicKey,
     shouldStop: isCleanupSuspendRequired,
     signal: controller.signal,
   });
@@ -1066,6 +1072,46 @@ async function activateCloudsync(
       onAccountMismatch,
     );
     return "ok";
+  }
+
+  if (hasWorkspaceProjection(credentials)) {
+    let keyProvisioning: Awaited<
+      ReturnType<typeof provisionMissingWorkspaceKeys>
+    >;
+    try {
+      keyProvisioning = await provisionMissingWorkspaceKeys(
+        credentials,
+        session.access_token,
+        accountUserId,
+        controller.signal,
+      );
+    } catch {
+      if (activeGeneration !== generation) {
+        return "ok";
+      }
+      console.warn("[cloudsync] shared workspace key provisioning failed");
+      scheduleExchange(
+        session,
+        activeGeneration,
+        RETRY_DELAY_MS,
+        onAccountMismatch,
+      );
+      return "ok";
+    }
+    if (activeGeneration !== generation) {
+      return "ok";
+    }
+    if (keyProvisioning !== "ready") {
+      scheduleExchange(
+        session,
+        activeGeneration,
+        keyProvisioning === "provisioned"
+          ? MIN_REFRESH_DELAY_MS
+          : RETRY_DELAY_MS,
+        onAccountMismatch,
+      );
+      return "ok";
+    }
   }
 
   setCredentialBlock(null);

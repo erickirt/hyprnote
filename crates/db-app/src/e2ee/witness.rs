@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anlg_e2ee::{OpenedField, WorkspaceKey};
+use anlg_e2ee::{OpenedField, WorkspaceKey, WorkspaceKeyring};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool, Transaction};
 
 use super::replica_storage::{prune_ciphertext_archive, retain_ciphertext};
@@ -325,7 +325,8 @@ pub async fn merge_e2ee_witness_events(
     workspace_id: &str,
     events: &[E2eeWitnessEvent],
 ) -> E2eeReplicaResult<()> {
-    merge_e2ee_witness_events_inner(pool, key, workspace_id, events, &|| false).await
+    let keyring = WorkspaceKeyring::new(key.clone());
+    merge_e2ee_witness_events_inner(pool, &keyring, workspace_id, events, &|| false).await
 }
 
 pub async fn merge_e2ee_witness_events_cancellable(
@@ -335,12 +336,32 @@ pub async fn merge_e2ee_witness_events_cancellable(
     events: &[E2eeWitnessEvent],
     is_cancelled: impl Fn() -> bool + Sync,
 ) -> E2eeReplicaResult<()> {
-    merge_e2ee_witness_events_inner(pool, key, workspace_id, events, &is_cancelled).await
+    let keyring = WorkspaceKeyring::new(key.clone());
+    merge_e2ee_witness_events_inner(pool, &keyring, workspace_id, events, &is_cancelled).await
+}
+
+pub async fn merge_e2ee_witness_events_with_keyring(
+    pool: &SqlitePool,
+    keyring: &WorkspaceKeyring,
+    workspace_id: &str,
+    events: &[E2eeWitnessEvent],
+) -> E2eeReplicaResult<()> {
+    merge_e2ee_witness_events_inner(pool, keyring, workspace_id, events, &|| false).await
+}
+
+pub async fn merge_e2ee_witness_events_with_keyring_cancellable(
+    pool: &SqlitePool,
+    keyring: &WorkspaceKeyring,
+    workspace_id: &str,
+    events: &[E2eeWitnessEvent],
+    is_cancelled: impl Fn() -> bool + Sync,
+) -> E2eeReplicaResult<()> {
+    merge_e2ee_witness_events_inner(pool, keyring, workspace_id, events, &is_cancelled).await
 }
 
 async fn merge_e2ee_witness_events_inner(
     pool: &SqlitePool,
-    key: &WorkspaceKey,
+    keyring: &WorkspaceKeyring,
     workspace_id: &str,
     events: &[E2eeWitnessEvent],
     is_cancelled: &(impl Fn() -> bool + Sync),
@@ -356,7 +377,7 @@ async fn merge_e2ee_witness_events_inner(
             return Err(E2eeReplicaError::InvalidRow);
         }
         let sequence = i64::try_from(event.sequence).map_err(|_| E2eeReplicaError::InvalidRow)?;
-        let field = key.open_field(workspace_id, &event.record_id, &event.payload)?;
+        let field = keyring.open_field(workspace_id, &event.record_id, &event.payload)?;
         check_e2ee_cancellation(is_cancelled)?;
         let revision = i64::try_from(field.revision).map_err(|_| E2eeReplicaError::InvalidRow)?;
         validate_opened_witness_field(
@@ -428,7 +449,7 @@ pub async fn advance_e2ee_witness_cursor(
 
 pub async fn repair_e2ee_replica_from_witness_bounded(
     pool: &SqlitePool,
-    keys: &HashMap<String, WorkspaceKey>,
+    keys: &HashMap<String, WorkspaceKeyring>,
     include_missing: bool,
     max_records: i64,
     max_bytes: usize,
@@ -446,7 +467,7 @@ pub async fn repair_e2ee_replica_from_witness_bounded(
 
 pub async fn repair_e2ee_replica_from_witness_bounded_cancellable(
     pool: &SqlitePool,
-    keys: &HashMap<String, WorkspaceKey>,
+    keys: &HashMap<String, WorkspaceKeyring>,
     include_missing: bool,
     max_records: i64,
     max_bytes: usize,
@@ -465,7 +486,7 @@ pub async fn repair_e2ee_replica_from_witness_bounded_cancellable(
 
 async fn repair_e2ee_replica_from_witness_bounded_inner(
     pool: &SqlitePool,
-    keys: &HashMap<String, WorkspaceKey>,
+    keys: &HashMap<String, WorkspaceKeyring>,
     include_missing: bool,
     max_records: i64,
     max_bytes: usize,
@@ -513,7 +534,7 @@ async fn repair_e2ee_replica_from_witness_bounded_inner(
 
 pub async fn has_pending_e2ee_witness_repairs(
     pool: &SqlitePool,
-    keys: &HashMap<String, WorkspaceKey>,
+    keys: &HashMap<String, WorkspaceKeyring>,
     include_missing: bool,
 ) -> E2eeReplicaResult<bool> {
     has_pending_e2ee_witness_repairs_inner(pool, keys, include_missing, &|| false).await
@@ -521,7 +542,7 @@ pub async fn has_pending_e2ee_witness_repairs(
 
 pub async fn has_pending_e2ee_witness_repairs_cancellable(
     pool: &SqlitePool,
-    keys: &HashMap<String, WorkspaceKey>,
+    keys: &HashMap<String, WorkspaceKeyring>,
     include_missing: bool,
     is_cancelled: impl Fn() -> bool + Sync,
 ) -> E2eeReplicaResult<bool> {
@@ -530,7 +551,7 @@ pub async fn has_pending_e2ee_witness_repairs_cancellable(
 
 async fn has_pending_e2ee_witness_repairs_inner(
     pool: &SqlitePool,
-    keys: &HashMap<String, WorkspaceKey>,
+    keys: &HashMap<String, WorkspaceKeyring>,
     include_missing: bool,
     is_cancelled: &(impl Fn() -> bool + Sync),
 ) -> E2eeReplicaResult<bool> {
@@ -568,7 +589,7 @@ async fn has_pending_e2ee_witness_repairs_inner(
 
 async fn load_bounded_e2ee_witness_repairs(
     pool: &SqlitePool,
-    keys: &HashMap<String, WorkspaceKey>,
+    keys: &HashMap<String, WorkspaceKeyring>,
     include_missing: bool,
     max_records: i64,
     max_bytes: usize,
@@ -733,7 +754,7 @@ async fn finish_e2ee_witness_repair_selection(
 
 async fn persist_e2ee_witness_repairs(
     pool: &SqlitePool,
-    keys: &HashMap<String, WorkspaceKey>,
+    keys: &HashMap<String, WorkspaceKeyring>,
     records: &[(WitnessRecord, i64)],
     is_cancelled: &(impl Fn() -> bool + Sync),
 ) -> E2eeReplicaResult<u64> {
@@ -743,7 +764,7 @@ async fn persist_e2ee_witness_repairs(
         let key = keys
             .get(&record.workspace_id)
             .ok_or(E2eeReplicaError::InvalidRow)?;
-        validate_witness_payload(
+        validate_witness_payload_with_keyring(
             key,
             &record.workspace_id,
             &record.record_id,
@@ -943,6 +964,22 @@ fn validate_witness_payload(
         return Err(E2eeReplicaError::RollbackDetected);
     }
     let field = key.open_field(workspace_id, record_id, payload)?;
+    validate_opened_witness_field(&field, payload_hash, payload, revision, writer_id)
+}
+
+fn validate_witness_payload_with_keyring(
+    keyring: &WorkspaceKeyring,
+    workspace_id: &str,
+    record_id: &str,
+    payload_hash: &str,
+    payload: &str,
+    revision: i64,
+    writer_id: &str,
+) -> E2eeReplicaResult<()> {
+    if anlg_e2ee::payload_hash(payload) != payload_hash {
+        return Err(E2eeReplicaError::RollbackDetected);
+    }
+    let field = keyring.open_field(workspace_id, record_id, payload)?;
     validate_opened_witness_field(&field, payload_hash, payload, revision, writer_id)
 }
 

@@ -14,13 +14,19 @@ use crate::{
     state::{AppState, ReplicaState},
 };
 
+mod grants;
 mod identity;
 mod projection;
 mod token;
 
+use grants::{
+    SetWorkspaceE2eeKeyRequest, SetWorkspaceE2eeKeyResult, WorkspaceE2eeKeyRecipient,
+    fetch_workspace_key_recipients, publish_workspace_e2ee_key,
+};
+use grants::{WorkspaceE2eeKeyGrant, fetch_workspace_key_grants};
 use identity::{
     SyncDeviceRow, claim_personal_e2ee_key, claim_sync_device, is_valid_e2ee_key_id,
-    list_sync_devices, remove_sync_device,
+    list_sync_devices, publish_e2ee_member_identity, remove_sync_device,
 };
 pub use projection::CloudsyncWorkspace;
 pub(super) use projection::encode_workspace_token_attributes;
@@ -38,6 +44,7 @@ const SUPABASE_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_
 const CLOUDSYNC_ENCRYPTION_VERSION: u8 = 2;
 const REPLICA_CREDENTIAL_TTL_SECONDS: u64 = 15 * 60;
 pub(super) const E2EE_KEY_ID_HEADER: &str = "x-anarlog-e2ee-key-id";
+pub(super) use identity::E2EE_MEMBER_PUBLIC_KEY_HEADER;
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +58,7 @@ pub struct CloudsyncCredentials {
     account_user_id: String,
     personal_workspace_id: String,
     workspaces: Vec<CloudsyncWorkspace>,
+    workspace_key_grants: Vec<WorkspaceE2eeKeyGrant>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -94,11 +102,21 @@ pub struct E2eeIdentity {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(create_credentials, create_replica_credentials, claim_e2ee_identity),
+    paths(
+        create_credentials,
+        create_replica_credentials,
+        claim_e2ee_identity,
+        get_workspace_e2ee_key_recipients,
+        set_workspace_e2ee_key
+    ),
     components(schemas(
         CloudsyncCredentialResponse,
         CloudsyncCredentials,
         CloudsyncWorkspace,
+        WorkspaceE2eeKeyGrant,
+        WorkspaceE2eeKeyRecipient,
+        SetWorkspaceE2eeKeyRequest,
+        SetWorkspaceE2eeKeyResult,
         ClaimE2eeIdentityRequest,
         E2eeIdentity,
         LegacyCloudsyncCredentials,
@@ -121,13 +139,82 @@ pub(super) fn replica_router() -> Router<ReplicaState> {
         .route("/e2ee/identity", put(claim_e2ee_identity))
         .route("/devices", get(get_devices))
         .route("/devices/{fingerprint}", delete(delete_device))
+        .route(
+            "/e2ee/workspaces/{workspace_id}/recipients",
+            get(get_workspace_e2ee_key_recipients),
+        )
+        .route(
+            "/e2ee/workspaces/{workspace_id}/key",
+            put(set_workspace_e2ee_key),
+        )
+}
+
+#[utoipa::path(
+    get,
+    path = "/e2ee/workspaces/{workspace_id}/recipients",
+    tag = "sync",
+    params(("workspace_id" = String, Path, description = "Shared workspace ID")),
+    responses(
+        (status = 200, description = "Active workspace key recipients", body = [WorkspaceE2eeKeyRecipient]),
+        (status = 400, description = "Invalid workspace ID"),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Workspace manager access required"),
+        (status = 502, description = "Workspace key service unavailable")
+    )
+)]
+async fn get_workspace_e2ee_key_recipients(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<ReplicaState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Json<Vec<WorkspaceE2eeKeyRecipient>>> {
+    if !auth.claims.is_pro() {
+        return Err(SyncError::ProPlanRequired);
+    }
+    Ok(Json(
+        fetch_workspace_key_recipients(&state, &auth.token, &workspace_id).await?,
+    ))
+}
+
+#[utoipa::path(
+    put,
+    path = "/e2ee/workspaces/{workspace_id}/key",
+    tag = "sync",
+    params(("workspace_id" = String, Path, description = "Shared workspace ID")),
+    request_body = SetWorkspaceE2eeKeyRequest,
+    responses(
+        (status = 200, description = "Wrapped workspace key published", body = SetWorkspaceE2eeKeyResult),
+        (status = 400, description = "Invalid workspace key grants"),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Workspace manager access required"),
+        (status = 502, description = "Workspace key service unavailable")
+    )
+)]
+async fn set_workspace_e2ee_key(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<ReplicaState>,
+    Path(workspace_id): Path<String>,
+    Json(request): Json<SetWorkspaceE2eeKeyRequest>,
+) -> Result<(
+    [(header::HeaderName, HeaderValue); 1],
+    Json<SetWorkspaceE2eeKeyResult>,
+)> {
+    if !auth.claims.is_pro() {
+        return Err(SyncError::ProPlanRequired);
+    }
+    Ok((
+        [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
+        Json(publish_workspace_e2ee_key(&state, &auth.token, &workspace_id, request).await?),
+    ))
 }
 
 #[utoipa::path(
     post,
     path = "/replica/credentials",
     tag = "sync",
-    params(("x-anarlog-e2ee-key-id" = String, Header, description = "Local recovery-key identity")),
+    params(
+        ("x-anarlog-e2ee-key-id" = String, Header, description = "Local recovery-key identity"),
+        ("x-anarlog-e2ee-member-public-key" = Option<String>, Header, description = "Account-level member identity public key")
+    ),
     responses(
         (status = 200, description = "Encrypted replica credentials", body = ReplicaCredentials),
         (status = 400, description = "Invalid E2EE key identity"),
@@ -149,6 +236,7 @@ async fn create_replica_credentials(
         return Err(SyncError::ProPlanRequired);
     }
 
+    publish_requested_member_identity(&state, &auth, &headers).await?;
     claim_sync_device(&state, &auth.claims.sub, &headers).await?;
     let requested_key_id = headers
         .get(E2EE_KEY_ID_HEADER)
@@ -236,7 +324,10 @@ async fn claim_e2ee_identity(
     post,
     path = "/token",
     tag = "sync",
-    params(("x-anarlog-e2ee-key-id" = Option<String>, Header, description = "Local recovery-key identity")),
+    params(
+        ("x-anarlog-e2ee-key-id" = Option<String>, Header, description = "Local recovery-key identity"),
+        ("x-anarlog-e2ee-member-public-key" = Option<String>, Header, description = "Account-level member identity public key")
+    ),
     responses(
         (status = 200, description = "Short-lived CloudSync credentials", body = CloudsyncCredentialResponse),
         (status = 401, description = "Authentication required"),
@@ -257,6 +348,7 @@ async fn create_credentials(
         return Err(SyncError::ProPlanRequired);
     }
 
+    publish_requested_member_identity(&state.replica, &auth, &headers).await?;
     claim_sync_device(&state.replica, &auth.claims.sub, &headers).await?;
 
     let requested_key_id = headers
@@ -310,6 +402,8 @@ async fn create_credentials(
     let workspace_rows = fetch_workspace_projection(&state.replica, &auth).await?;
     let (personal_workspace_id, workspaces) =
         validate_workspace_projection(workspace_rows, &auth.claims.sub)?;
+    let workspace_key_grants =
+        fetch_workspace_key_grants(&state.replica, &auth.token, &workspaces).await?;
     let encryption_key_id =
         claim_personal_e2ee_key(&state.replica, &auth.claims.sub, requested_key_id).await?;
     let token_attributes = encode_workspace_token_attributes(&workspaces)?;
@@ -337,6 +431,21 @@ async fn create_credentials(
             account_user_id: auth.claims.sub,
             personal_workspace_id,
             workspaces,
+            workspace_key_grants,
         })),
     ))
+}
+
+async fn publish_requested_member_identity(
+    state: &ReplicaState,
+    auth: &AuthContext,
+    headers: &HeaderMap,
+) -> Result<()> {
+    let Some(public_key) = headers.get(E2EE_MEMBER_PUBLIC_KEY_HEADER) else {
+        return Ok(());
+    };
+    let public_key = public_key
+        .to_str()
+        .map_err(|_| SyncError::BadRequest("E2EE member identity is invalid".to_string()))?;
+    publish_e2ee_member_identity(state, &auth.token, public_key).await
 }

@@ -1,5 +1,122 @@
 use super::*;
 
+const TEST_MEMBER_PUBLIC_KEY: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq";
+const TEST_SHARED_WORKSPACE_ID: &str = "11111111-1111-4111-8111-111111111111";
+const TEST_RECIPIENT_USER_ID: &str = "22222222-2222-4222-8222-222222222222";
+
+#[tokio::test]
+async fn lists_workspace_key_recipients_with_the_user_session() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/rest/v1/rpc/list_workspace_key_recipients"))
+        .and(header("apikey", "anon-key"))
+        .and(header("authorization", "Bearer supabase-token"))
+        .and(body_partial_json(json!({
+            "p_workspace_id": TEST_SHARED_WORKSPACE_ID,
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "user_id": TEST_RECIPIENT_USER_ID,
+            "user_email": "member@example.com",
+            "role": "member",
+            "public_key": TEST_MEMBER_PUBLIC_KEY,
+            "granted_key_ids": ["AAAAAAAAAAAAAAAAAAAAAA"],
+        }])))
+        .mount(&server)
+        .await;
+
+    let response = test_router(&server, "issuer-key", &["hyprnote_pro"])
+        .oneshot(
+            Request::get(format!(
+                "/e2ee/workspaces/{TEST_SHARED_WORKSPACE_ID}/recipients"
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body[0]["userId"], TEST_RECIPIENT_USER_ID);
+    assert_eq!(body[0]["publicKey"], TEST_MEMBER_PUBLIC_KEY);
+    assert_eq!(body[0]["grantedKeyIds"][0], "AAAAAAAAAAAAAAAAAAAAAA");
+}
+
+#[tokio::test]
+async fn publishes_only_wrapped_workspace_key_grants_with_the_user_session() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/rest/v1/rpc/set_workspace_e2ee_key"))
+        .and(header("apikey", "anon-key"))
+        .and(header("authorization", "Bearer supabase-token"))
+        .and(body_partial_json(json!({
+            "p_workspace_id": TEST_SHARED_WORKSPACE_ID,
+            "p_key_id": "AAAAAAAAAAAAAAAAAAAAAA",
+            "p_grants": [{
+                "userId": TEST_RECIPIENT_USER_ID,
+                "ephemeralPublicKey": "A".repeat(43),
+                "nonce": "B".repeat(32),
+                "ciphertext": "C".repeat(64),
+            }],
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "key_id": "AAAAAAAAAAAAAAAAAAAAAA",
+            "granted_member_count": 1,
+        }])))
+        .mount(&server)
+        .await;
+
+    let response = test_router(&server, "issuer-key", &["hyprnote_pro"])
+        .oneshot(
+            Request::put(format!("/e2ee/workspaces/{TEST_SHARED_WORKSPACE_ID}/key"))
+                .header(http_header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "keyId": "AAAAAAAAAAAAAAAAAAAAAA",
+                        "grants": [{
+                            "userId": TEST_RECIPIENT_USER_ID,
+                            "ephemeralPublicKey": "A".repeat(43),
+                            "nonce": "B".repeat(32),
+                            "ciphertext": "C".repeat(64),
+                        }],
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[http_header::CACHE_CONTROL], "no-store");
+    let body = response_json(response).await;
+    assert_eq!(body["keyId"], "AAAAAAAAAAAAAAAAAAAAAA");
+    assert_eq!(body["grantedMemberCount"], 1);
+}
+
+#[tokio::test]
+async fn rejects_malformed_workspace_key_grants_without_contacting_supabase() {
+    let server = MockServer::start().await;
+    let response = test_router(&server, "issuer-key", &["hyprnote_pro"])
+        .oneshot(
+            Request::put(format!("/e2ee/workspaces/{TEST_SHARED_WORKSPACE_ID}/key"))
+                .header(http_header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "keyId": "invalid",
+                        "grants": [],
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn issues_replica_credentials_without_contacting_sqlitecloud() {
     let server = MockServer::start().await;
@@ -35,6 +152,64 @@ async fn issues_replica_credentials_without_contacting_sqlitecloud() {
 }
 
 #[tokio::test]
+async fn publishes_the_member_identity_before_issuing_replica_credentials() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/rest/v1/rpc/publish_e2ee_member_identity"))
+        .and(header("apikey", "anon-key"))
+        .and(header("authorization", "Bearer supabase-token"))
+        .and(body_partial_json(json!({
+            "p_public_key": TEST_MEMBER_PUBLIC_KEY,
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "public_key": TEST_MEMBER_PUBLIC_KEY,
+        }])))
+        .mount(&server)
+        .await;
+    mock_e2ee_key_claim(&server, TEST_KEY_ID).await;
+
+    let response = test_router(&server, "issuer-key", &["hyprnote_pro"])
+        .oneshot(
+            Request::post("/replica/credentials")
+                .header(E2EE_KEY_ID_HEADER, TEST_KEY_ID)
+                .header(E2EE_MEMBER_PUBLIC_KEY_HEADER, TEST_MEMBER_PUBLIC_KEY)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(
+        requests[0].url.path(),
+        "/rest/v1/rpc/publish_e2ee_member_identity"
+    );
+    assert_eq!(
+        requests[1].url.path(),
+        "/rest/v1/rpc/claim_personal_workspace_e2ee_key"
+    );
+}
+
+#[tokio::test]
+async fn rejects_a_malformed_member_identity_without_contacting_supabase() {
+    let server = MockServer::start().await;
+    let response = test_router(&server, "issuer-key", &["hyprnote_pro"])
+        .oneshot(
+            Request::post("/replica/credentials")
+                .header(E2EE_KEY_ID_HEADER, TEST_KEY_ID)
+                .header(E2EE_MEMBER_PUBLIC_KEY_HEADER, "invalid")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn mints_token_for_verified_supabase_subject() {
     let server = MockServer::start().await;
     mock_workspace_projection(
@@ -56,6 +231,20 @@ async fn mints_token_for_verified_supabase_subject() {
                 }
             },
             personal_workspace("user-123")
+        ]),
+    )
+    .await;
+    mock_workspace_key_grants(
+        &server,
+        json!([
+            {
+                "workspace_id": "workspace-team",
+                "key_id": "AAAAAAAAAAAAAAAAAAAAAA",
+                "ephemeral_public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "nonce": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+                "ciphertext": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+                "is_active": true
+            }
         ]),
     )
     .await;
@@ -104,16 +293,29 @@ async fn mints_token_for_verified_supabase_subject() {
     );
     assert_eq!(body["workspaces"][1]["createdAt"], "2026-07-16T09:00:00Z");
     assert_eq!(body["workspaces"][1]["updatedAt"], "2026-07-16T10:00:00Z");
+    assert_eq!(
+        body["workspaceKeyGrants"][0]["workspaceId"],
+        "workspace-team"
+    );
+    assert_eq!(
+        body["workspaceKeyGrants"][0]["keyId"],
+        "AAAAAAAAAAAAAAAAAAAAAA"
+    );
+    assert_eq!(body["workspaceKeyGrants"][0]["isActive"], true);
     assert!(body["expiresAt"].as_str().unwrap().ends_with('Z'));
 
     let requests = server.received_requests().await.unwrap();
     assert_eq!(requests[0].url.path(), "/rest/v1/workspace_memberships");
     assert_eq!(
         requests[1].url.path(),
+        "/rest/v1/rpc/list_all_my_workspace_e2ee_grants"
+    );
+    assert_eq!(
+        requests[2].url.path(),
         "/rest/v1/rpc/claim_personal_workspace_e2ee_key"
     );
-    assert_eq!(requests[2].url.path(), "/v2/tokens");
-    let token_request: Value = serde_json::from_slice(&requests[2].body).unwrap();
+    assert_eq!(requests[3].url.path(), "/v2/tokens");
+    let token_request: Value = serde_json::from_slice(&requests[3].body).unwrap();
     assert_eq!(token_request.as_object().unwrap().len(), 4);
     assert_eq!(token_request["userId"], "user-123");
     let attributes: Value =
