@@ -775,14 +775,6 @@ async function activateCloudsync(
     suspendedBeforeCredentialExchange = true;
   }
 
-  if (!status.cloudsync_enabled) {
-    setCredentialBlock("unavailable");
-    console.warn(
-      "[cloudsync] native sync is unavailable; sync remains disabled",
-    );
-    return "ok";
-  }
-
   if (status.activity_paused) {
     scheduleActivityStatusRetry(
       session,
@@ -919,6 +911,7 @@ async function activateCloudsync(
 
   const exchange = await requestCloudsyncCredentials({
     accessToken: session.access_token,
+    cloudsyncExtensionAvailable: status.extension_loaded,
     encryptionKeyId,
     shouldStop: isCleanupSuspendRequired,
     signal: controller.signal,
