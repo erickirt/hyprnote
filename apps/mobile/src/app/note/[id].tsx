@@ -1,8 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { File, Paths } from "expo-file-system";
+import * as Linking from "expo-linking";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
+  InputAccessoryView,
+  Keyboard,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,8 +18,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useSessionRecorder } from "@/audio/use-session-recorder";
 import { AudioChip } from "@/components/audio-chip";
+import { EditorAccessory } from "@/components/editor-accessory";
+import { HandoffCard } from "@/components/handoff-card";
 import { ListeningSheet } from "@/components/listening-sheet";
-import { Colors, Spacing } from "@/constants/theme";
+import { Card } from "@/components/ui/card";
+import { IconButton } from "@/components/ui/icon-button";
+import { Colors, Spacing, Typography } from "@/constants/theme";
 import { useSessionAudio } from "@/data/audio-catalog";
 import {
   deleteSession,
@@ -25,8 +33,123 @@ import {
 } from "@/data/session";
 import { transcribeSession, useTranscriptionState } from "@/data/transcribe";
 import { useSessionTranscripts } from "@/data/transcripts";
+import { captureAnalytics } from "@/lib/analytics";
 import { confirmDestructive } from "@/lib/confirm";
+import { applyEditorFormat, type EditorFormat } from "@/lib/editor-format";
 import { captureOperationalError } from "@/lib/error-reporting";
+import { useMountEffect } from "@/lib/use-mount-effect";
+
+function BodyEditor({
+  accessoryId,
+  defaultBodyFormat,
+  defaultValue,
+  editable,
+  onChangeText,
+}: {
+  accessoryId: string;
+  defaultBodyFormat: "prosemirror_json" | "markdown";
+  defaultValue: string;
+  editable: boolean;
+  onChangeText: (
+    body: string,
+    bodyFormat: "prosemirror_json" | "markdown",
+  ) => void;
+}) {
+  const inputRef = useRef<TextInput>(null);
+  const textRef = useRef(defaultValue);
+  const bodyFormatRef = useRef(defaultBodyFormat);
+  const selectionRef = useRef({ start: 0, end: 0 });
+  // Normal typing stays native so iOS retains its caret and scroll state;
+  // toolbar commands briefly override both without remounting the editor.
+  const [nativeOverride, setNativeOverride] = useState<{
+    text: string;
+    selection: { start: number; end: number };
+  }>();
+  const [androidKeyboardVisible, setAndroidKeyboardVisible] = useState(false);
+
+  useMountEffect(() => {
+    if (Platform.OS !== "android") return;
+    const showSubscription = Keyboard.addListener("keyboardDidShow", () =>
+      setAndroidKeyboardVisible(true),
+    );
+    const hideSubscription = Keyboard.addListener("keyboardDidHide", () =>
+      setAndroidKeyboardVisible(false),
+    );
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  });
+
+  const handleChangeText = (body: string) => {
+    textRef.current = body;
+    onChangeText(body, bodyFormatRef.current);
+  };
+
+  const handleFormat = (format: EditorFormat) => {
+    const formatted = applyEditorFormat(
+      textRef.current,
+      selectionRef.current,
+      format,
+    );
+    textRef.current = formatted.text;
+    bodyFormatRef.current = formatted.bodyFormat;
+    selectionRef.current = formatted.selection;
+    setNativeOverride({
+      text: formatted.text,
+      selection: formatted.selection,
+    });
+    onChangeText(formatted.text, formatted.bodyFormat);
+    inputRef.current?.focus();
+    requestAnimationFrame(() => setNativeOverride(undefined));
+  };
+
+  const handleDismissKeyboard = () => {
+    inputRef.current?.blur();
+    Keyboard.dismiss();
+  };
+
+  return (
+    <>
+      <TextInput
+        ref={inputRef}
+        style={styles.body}
+        multiline
+        editable={editable}
+        inputAccessoryViewID={Platform.OS === "ios" ? accessoryId : undefined}
+        defaultValue={defaultValue}
+        value={nativeOverride?.text}
+        selection={nativeOverride?.selection}
+        placeholder="Start typing…"
+        placeholderTextColor={Colors.muted}
+        textAlignVertical="top"
+        onChangeText={handleChangeText}
+        onSelectionChange={(event) => {
+          selectionRef.current = event.nativeEvent.selection;
+        }}
+      />
+      {Platform.OS === "ios" && editable && (
+        <InputAccessoryView
+          nativeID={accessoryId}
+          backgroundColor={Colors.background}
+        >
+          <EditorAccessory
+            onFormat={handleFormat}
+            onDismiss={handleDismissKeyboard}
+          />
+        </InputAccessoryView>
+      )}
+      {Platform.OS === "android" && editable && androidKeyboardVisible && (
+        <View style={styles.androidAccessory}>
+          <EditorAccessory
+            onFormat={handleFormat}
+            onDismiss={handleDismissKeyboard}
+          />
+        </View>
+      )}
+    </>
+  );
+}
 
 export default function NoteScreen() {
   const router = useRouter();
@@ -43,7 +166,11 @@ export default function NoteScreen() {
 
   const dataRef = useRef(data);
   dataRef.current = data;
-  const draftRef = useRef<{ title?: string; body?: string }>({});
+  const draftRef = useRef<{
+    title?: string;
+    body?: string;
+    bodyFormat?: "prosemirror_json" | "markdown";
+  }>({});
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // The live query lags our own writes, so a body-only flush would otherwise
@@ -64,16 +191,17 @@ export default function NoteScreen() {
     if (!current) return;
     if (draft.body !== undefined) {
       const title = draft.title ?? savedTitleRef.current ?? current.title;
+      const bodyFormat = draft.bodyFormat ?? current.bodyFormat;
       savedTitleRef.current = title;
       void saveSessionNote(id, {
         title,
         bodyText: draft.body,
-        bodyFormat: current.bodyFormat,
+        bodyFormat,
       }).catch((error) => {
         captureOperationalError(error, {
           operation: "session_note_save",
           tags: {
-            body_format: current.bodyFormat,
+            body_format: bodyFormat,
             edit_type: "body",
           },
         });
@@ -89,31 +217,50 @@ export default function NoteScreen() {
     }
   };
 
-  useEffect(() => flush, [id]);
+  useMountEffect(() => {
+    captureAnalytics("note_opened", {
+      entry_point: "mobile_note",
+    });
+    return flush;
+  });
 
-  const onEdit = (patch: Partial<{ title: string; body: string }>) => {
+  const onEdit = (
+    patch: Partial<{
+      title: string;
+      body: string;
+      bodyFormat: "prosemirror_json" | "markdown";
+    }>,
+  ) => {
     draftRef.current = { ...draftRef.current, ...patch };
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(flush, 500);
   };
 
   const handleBack = async () => {
-    // Never lose a live recording to navigation — stop and save first.
-    if (recorder.phase === "recording" || recorder.phase === "starting") {
-      await recorder.stop();
-    }
+    await recorder.stop();
     flush();
     if (router.canGoBack()) router.back();
     else router.replace("/");
   };
 
   const handleStop = async () => {
-    if (recorder.phase === "error" || recorder.phase === "unavailable") {
-      setListening(false);
-      return;
-    }
     const result = await recorder.stop();
     if (result !== "failed") setListening(false);
+  };
+
+  const handleRetryRecording = async () => {
+    const result = await recorder.retry();
+    if (result === "saved") setListening(false);
+  };
+
+  const handleOpenSettings = async () => {
+    try {
+      await Linking.openSettings();
+    } catch (error) {
+      captureOperationalError(error, {
+        operation: "recording_permission_settings_open",
+      });
+    }
   };
 
   const handleDelete = async () => {
@@ -122,11 +269,7 @@ export default function NoteScreen() {
       "Delete",
     );
     if (!confirmed) return;
-    // Same window as handleBack: unmounting during startup would let the hook's
-    // own teardown save audio against an already-tombstoned session.
-    if (recorder.phase === "recording" || recorder.phase === "starting") {
-      await recorder.stop();
-    }
+    await recorder.stop();
     draftRef.current = {};
     try {
       await deleteSession(id);
@@ -143,12 +286,18 @@ export default function NoteScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <Pressable hitSlop={8} onPress={() => void handleBack()}>
-          <Ionicons name="arrow-back" size={24} color={Colors.ink} />
-        </Pressable>
-        <Pressable hitSlop={8} onPress={() => void handleDelete()}>
-          <Ionicons name="trash-outline" size={20} color={Colors.ink} />
-        </Pressable>
+        <IconButton
+          accessibilityLabel="Back"
+          icon="arrow-back"
+          iconSize={22}
+          onPress={() => void handleBack()}
+        />
+        <IconButton
+          accessibilityLabel="Delete note"
+          icon="trash-outline"
+          onPress={() => void handleDelete()}
+          tone="muted"
+        />
       </View>
 
       {!isLoading && data && (
@@ -161,15 +310,23 @@ export default function NoteScreen() {
             onChangeText={(title) => onEdit({ title })}
           />
           {audio.data && (
-            <AudioChip
-              key={`${audio.data.filename}:${audio.data.createdAt}`}
-              uri={
-                new File(Paths.document, "sessions", id, audio.data.filename)
-                  .uri
-              }
-              filename={audio.data.filename}
-              sizeBytes={audio.data.sizeBytes}
-            />
+            <View key={`${audio.data.filename}:${audio.data.createdAt}`}>
+              <AudioChip
+                uri={
+                  new File(Paths.document, "sessions", id, audio.data.filename)
+                    .uri
+                }
+                filename={audio.data.filename}
+                sizeBytes={audio.data.sizeBytes}
+              />
+              <HandoffCard
+                uri={
+                  new File(Paths.document, "sessions", id, audio.data.filename)
+                    .uri
+                }
+                filename={audio.data.filename}
+              />
+            </View>
           )}
           {audio.data &&
             audio.data.transcriptStatus !== "complete" &&
@@ -190,7 +347,7 @@ export default function NoteScreen() {
               </Pressable>
             ))}
           {transcripts.length > 0 && (
-            <View style={styles.transcript}>
+            <Card style={styles.transcript} tone="muted">
               <Text style={styles.transcriptTitle}>Transcript</Text>
               <ScrollView style={styles.transcriptScroll} nestedScrollEnabled>
                 {transcripts.map((segment) => (
@@ -199,7 +356,7 @@ export default function NoteScreen() {
                   </Text>
                 ))}
               </ScrollView>
-            </View>
+            </Card>
           )}
           {!data.plainEditable && (
             <View style={styles.readOnlyChip}>
@@ -213,15 +370,12 @@ export default function NoteScreen() {
               </Text>
             </View>
           )}
-          <TextInput
-            style={styles.body}
-            multiline
-            editable={data.plainEditable}
+          <BodyEditor
+            accessoryId={`note-editor-controls-${data.id}`}
+            defaultBodyFormat={data.bodyFormat}
             defaultValue={data.noteText}
-            placeholder="Start typing…"
-            placeholderTextColor={Colors.muted}
-            textAlignVertical="top"
-            onChangeText={(body) => onEdit({ body })}
+            editable={data.plainEditable}
+            onChangeText={(body, bodyFormat) => onEdit({ body, bodyFormat })}
           />
         </View>
       )}
@@ -229,9 +383,12 @@ export default function NoteScreen() {
       {listening && (
         <ListeningSheet
           phase={recorder.phase}
-          levels={recorder.levels}
+          failure={recorder.failure}
+          amplitude={recorder.amplitude}
           durationMs={recorder.durationMs}
           onStop={() => void handleStop()}
+          onRetry={() => void handleRetryRecording()}
+          onOpenSettings={() => void handleOpenSettings()}
         />
       )}
     </SafeAreaView>
@@ -241,7 +398,7 @@ export default function NoteScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: Colors.paper,
+    backgroundColor: Colors.background,
   },
   header: {
     flexDirection: "row",
@@ -255,22 +412,20 @@ const styles = StyleSheet.create({
   },
   title: {
     paddingHorizontal: Spacing.lg,
-    fontSize: 24,
-    fontWeight: "700",
+    ...Typography.title,
     color: Colors.ink,
   },
   transcribeStatus: {
     marginHorizontal: Spacing.lg,
     marginTop: Spacing.xs,
-    fontSize: 12,
+    ...Typography.caption,
     color: Colors.muted,
   },
   transcribeAction: {
     marginHorizontal: Spacing.lg,
     marginTop: Spacing.xs,
-    fontSize: 12,
-    fontWeight: "600",
-    color: Colors.accent,
+    ...Typography.captionStrong,
+    color: Colors.ink,
   },
   transcribePressed: {
     opacity: 0.6,
@@ -278,10 +433,12 @@ const styles = StyleSheet.create({
   transcript: {
     marginHorizontal: Spacing.lg,
     marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.xs,
   },
   transcriptTitle: {
-    fontSize: 13,
-    fontWeight: "600",
+    ...Typography.captionStrong,
     color: Colors.muted,
     marginBottom: Spacing.xs,
   },
@@ -289,8 +446,7 @@ const styles = StyleSheet.create({
     maxHeight: 160,
   },
   transcriptText: {
-    fontSize: 14,
-    lineHeight: 20,
+    ...Typography.body,
     color: Colors.ink,
     marginBottom: Spacing.sm,
   },
@@ -302,14 +458,17 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
   },
   readOnlyLabel: {
-    fontSize: 12,
+    ...Typography.caption,
     color: Colors.muted,
   },
   body: {
     flex: 1,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.md,
-    fontSize: 16,
+    ...Typography.body,
     color: Colors.ink,
+  },
+  androidAccessory: {
+    backgroundColor: Colors.background,
   },
 });

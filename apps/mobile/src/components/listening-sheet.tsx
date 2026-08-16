@@ -13,9 +13,20 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-import type { RecorderPhase } from "@/audio/use-session-recorder";
-import { Waveform } from "@/components/waveform";
-import { Colors, CornerCurve, Radius, Spacing } from "@/constants/theme";
+import type {
+  RecorderFailure,
+  RecorderPhase,
+} from "@/audio/use-session-recorder";
+import { DancingSticks } from "@/components/dancing-sticks";
+import {
+  Colors,
+  CornerCurve,
+  LISTENING_CONTROL_HEIGHT,
+  LISTENING_CONTROL_RADIUS,
+  Radius,
+  Spacing,
+  Typography,
+} from "@/constants/theme";
 
 const DETAIL_HEIGHT = 96;
 
@@ -33,9 +44,15 @@ function statusLabel(phase: RecorderPhase, durationMs: number): string {
     case "saving":
       return "Saving recording…";
     case "unavailable":
-      return "Microphone unavailable";
+      return "Microphone access needed";
+    case "interrupted":
+      return "Recording interrupted";
+    case "save_error":
+      return "Recording needs to be saved";
     case "error":
-      return "Couldn't save the recording";
+      return "Recorder unavailable";
+    case "saved":
+      return "Recording saved";
     default:
       return "Getting ready…";
   }
@@ -43,14 +60,20 @@ function statusLabel(phase: RecorderPhase, durationMs: number): string {
 
 export function ListeningSheet({
   phase,
-  levels,
+  failure,
+  amplitude,
   durationMs,
   onStop,
+  onRetry,
+  onOpenSettings,
 }: {
   phase: RecorderPhase;
-  levels: number[] | null;
+  failure: RecorderFailure | null;
+  amplitude: number;
   durationMs: number;
   onStop: () => void;
+  onRetry: () => void;
+  onOpenSettings: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const detailHeight = useSharedValue(0);
@@ -66,6 +89,14 @@ export function ListeningSheet({
   const detailStyle = useAnimatedStyle(() => ({
     height: detailHeight.value,
   }));
+  const permissionDenied =
+    phase === "unavailable" && failure === "permission_denied";
+  const recoverable = ["interrupted", "save_error", "error"].includes(phase);
+  const handlePanelPress = permissionDenied
+    ? onOpenSettings
+    : recoverable
+      ? onRetry
+      : onStop;
 
   return (
     <View style={styles.sheet}>
@@ -73,7 +104,7 @@ export function ListeningSheet({
         <Ionicons
           name={expanded ? "chevron-down" : "chevron-up"}
           size={22}
-          color={Colors.ink}
+          color={Colors.muted}
         />
       </Pressable>
 
@@ -85,13 +116,13 @@ export function ListeningSheet({
           </Text>
         </View>
         <Text style={styles.detailHint}>
-          Leave your phone on the table and talk. The transcript is generated
-          once the recording syncs.
+          Leave your phone on the table and talk. Audio saves locally first;
+          transcription starts after you stop.
         </Text>
       </Animated.View>
 
       <Pressable
-        onPress={onStop}
+        onPress={handlePanelPress}
         disabled={phase === "saving"}
         style={({ pressed }) => [styles.panel, pressed && styles.panelPressed]}
       >
@@ -99,14 +130,37 @@ export function ListeningSheet({
           <View style={styles.panelCenter}>
             <ActivityIndicator color={Colors.inkInverse} />
           </View>
-        ) : phase === "error" ? (
+        ) : permissionDenied ? (
           <View style={styles.panelCenter}>
             <Text style={styles.panelMessage}>
-              Couldn't save — tap to dismiss
+              Microphone access is off — open Settings
             </Text>
           </View>
+        ) : phase === "interrupted" ? (
+          <View style={styles.panelCenter}>
+            <Text style={styles.panelMessage}>
+              Interrupted — tap to save or retry
+            </Text>
+          </View>
+        ) : phase === "save_error" ? (
+          <View style={styles.panelCenter}>
+            <Text style={styles.panelMessage}>
+              Couldn't save — tap to retry
+            </Text>
+          </View>
+        ) : phase === "error" ? (
+          <View style={styles.panelCenter}>
+            <Text style={styles.panelMessage}>Tap to recover recording</Text>
+          </View>
         ) : (
-          <Waveform levels={levels} />
+          <DancingSticks
+            amplitude={amplitude}
+            color={Colors.inkInverse}
+            height={36}
+            width={80}
+            stickWidth={3}
+            gap={3}
+          />
         )}
       </Pressable>
     </View>
@@ -115,14 +169,19 @@ export function ListeningSheet({
 
 const styles = StyleSheet.create({
   sheet: {
-    borderWidth: 1.5,
+    borderWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: 0,
-    borderColor: Colors.ink,
-    borderTopLeftRadius: Radius.pill,
-    borderTopRightRadius: Radius.pill,
-    backgroundColor: Colors.paper,
-    paddingHorizontal: Spacing.md,
+    borderColor: Colors.border,
+    borderTopLeftRadius: Radius.sheet,
+    borderTopRightRadius: Radius.sheet,
+    backgroundColor: Colors.background,
+    paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.md,
+    shadowColor: Colors.ink,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 4,
   },
   chevron: {
     alignSelf: "center",
@@ -145,34 +204,33 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
   },
   detailStatus: {
-    fontSize: 15,
-    fontWeight: "600",
+    ...Typography.bodyStrong,
     color: Colors.ink,
   },
   detailHint: {
     paddingHorizontal: Spacing.sm,
     paddingTop: Spacing.sm,
-    fontSize: 14,
-    lineHeight: 20,
+    ...Typography.caption,
     color: Colors.muted,
   },
   panel: {
-    borderRadius: Radius.card + 4,
+    height: LISTENING_CONTROL_HEIGHT,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: LISTENING_CONTROL_RADIUS,
     borderCurve: CornerCurve.squircle,
     backgroundColor: Colors.accent,
-    paddingVertical: Spacing.md,
   },
   panelPressed: {
     opacity: 0.9,
   },
   panelCenter: {
-    height: 72,
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   panelMessage: {
-    fontSize: 15,
-    fontWeight: "600",
+    ...Typography.label,
     color: Colors.inkInverse,
   },
 });
