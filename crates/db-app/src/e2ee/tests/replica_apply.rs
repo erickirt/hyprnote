@@ -1,6 +1,69 @@
 use super::*;
 
 #[tokio::test]
+async fn empty_replica_placeholders_wait_for_ciphertext() {
+    let workspace_keys = keys("workspace-a");
+    let source = test_db().await;
+    sqlx::query(
+        "INSERT INTO sessions (id, workspace_id, owner_user_id, title)
+         VALUES ('session-1', 'workspace-a', 'user-a', 'Ready')",
+    )
+    .execute(source.pool())
+    .await
+    .unwrap();
+    encrypt_e2ee_replica_changes(source.pool(), &workspace_keys)
+        .await
+        .unwrap();
+    let record_id = workspace_keys["workspace-a"].blind_field_id("sessions", "session-1", "title");
+    let payload: String = sqlx::query_scalar("SELECT payload FROM e2ee_records WHERE id = ?")
+        .bind(&record_id)
+        .fetch_one(source.pool())
+        .await
+        .unwrap();
+
+    let target = test_db().await;
+    sqlx::query("INSERT INTO e2ee_records (id, workspace_id) VALUES (?, 'workspace-a')")
+        .bind(&record_id)
+        .execute(target.pool())
+        .await
+        .unwrap();
+
+    let stats = apply_e2ee_replica_changes(target.pool(), &workspace_keys)
+        .await
+        .unwrap();
+    assert_eq!(stats, E2eeReplicaStats::default());
+    let repair = repair_e2ee_replica_from_witness_bounded(
+        target.pool(),
+        &workspace_keys,
+        true,
+        64,
+        usize::MAX,
+    )
+    .await
+    .unwrap();
+    assert_eq!(repair.repaired_records, 0);
+    assert!(!repair.remaining);
+
+    sqlx::query("UPDATE e2ee_records SET payload = ? WHERE id = ?")
+        .bind(&payload)
+        .bind(&record_id)
+        .execute(target.pool())
+        .await
+        .unwrap();
+    apply_e2ee_replica_changes(target.pool(), &workspace_keys)
+        .await
+        .unwrap();
+    let payload_hash: String = sqlx::query_scalar(
+        "SELECT payload_hash FROM e2ee_replica_payload_hashes WHERE record_id = ?",
+    )
+    .bind(&record_id)
+    .fetch_one(target.pool())
+    .await
+    .unwrap();
+    assert_eq!(payload_hash, anlg_e2ee::payload_hash(&payload));
+}
+
+#[tokio::test]
 async fn field_chunk_before_manifest_waits_then_applies_without_echo() {
     let workspace_keys = keys("workspace-a");
     let source = test_db().await;
@@ -35,13 +98,38 @@ async fn field_chunk_before_manifest_waits_then_applies_without_echo() {
              VALUES (?, 'workspace-a', ?)",
     )
     .bind(&title_id)
-    .bind(title_payload)
+    .bind(&title_payload)
     .execute(target.pool())
     .await
     .unwrap();
+    let before_apply: (String, String) = sqlx::query_as(
+        "SELECT replica_hash.payload_hash, replica.updated_at
+         FROM e2ee_records AS replica
+         JOIN e2ee_replica_payload_hashes AS replica_hash
+           ON replica_hash.record_id = replica.id
+         WHERE replica.id = ?",
+    )
+    .bind(&title_id)
+    .fetch_one(target.pool())
+    .await
+    .unwrap();
+    assert!(before_apply.0.is_empty());
     apply_e2ee_replica_changes(target.pool(), &workspace_keys)
         .await
         .unwrap();
+    let after_apply: (String, String) = sqlx::query_as(
+        "SELECT replica_hash.payload_hash, replica.updated_at
+         FROM e2ee_records AS replica
+         JOIN e2ee_replica_payload_hashes AS replica_hash
+           ON replica_hash.record_id = replica.id
+         WHERE replica.id = ?",
+    )
+    .bind(&title_id)
+    .fetch_one(target.pool())
+    .await
+    .unwrap();
+    assert_eq!(after_apply.0, anlg_e2ee::payload_hash(&title_payload));
+    assert_eq!(after_apply.1, before_apply.1);
     let before_manifest: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE id = 'session-1'")
             .fetch_one(target.pool())
@@ -838,15 +926,26 @@ async fn replica_apply_scan_bounds_payload_comparisons_before_filtering() {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO e2ee_records (id, workspace_id, payload_hash, payload)
-         SELECT record_id, workspace_id, payload_hash, payload FROM e2ee_witness_records",
+        "INSERT INTO e2ee_records (id, workspace_id, payload)
+         SELECT record_id, workspace_id, payload FROM e2ee_witness_records",
+    )
+    .execute(target.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE e2ee_replica_payload_hashes
+         SET payload_hash = (
+           SELECT witness.payload_hash
+           FROM e2ee_witness_records AS witness
+           WHERE witness.record_id = e2ee_replica_payload_hashes.record_id
+         )",
     )
     .execute(target.pool())
     .await
     .unwrap();
     sqlx::query(
         "INSERT INTO e2ee_local_state (record_id, workspace_id, payload_hash, payload)
-         SELECT id, workspace_id, payload_hash, payload FROM e2ee_records",
+         SELECT record_id, workspace_id, payload_hash, payload FROM e2ee_witness_records",
     )
     .execute(target.pool())
     .await
@@ -854,8 +953,16 @@ async fn replica_apply_scan_bounds_payload_comparisons_before_filtering() {
 
     sqlx::query(
         "UPDATE e2ee_records
-         SET payload_hash = 'changed-hash', payload = 'changed'
+         SET payload = 'changed'
          WHERE id = 'record-255'",
+    )
+    .execute(target.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE e2ee_replica_payload_hashes
+         SET payload_hash = 'changed-hash'
+         WHERE record_id = 'record-255'",
     )
     .execute(target.pool())
     .await
