@@ -1,0 +1,28 @@
+rust:
+  directory: ../..
+  manifestPath: crates/mobile-bridge/Cargo.toml
+
+bindings:
+  cpp: cpp/generated
+  ts: src/generated
+
+android:
+  directory: android
+  apiLevel: 24
+  jniLibs: src/main/jniLibs
+  packageName: so.anarlog.mobilebridge
+  useSharedLibrary: true
+
+ios:
+  directory: ios
+  frameworkName: build/MobileBridge
+  targets:
+    - aarch64-apple-ios
+    - aarch64-apple-ios-sim
+    - x86_64-apple-ios
+
+turboModule:
+  cpp: cpp
+  ts: src
+  spec: NativeMobileBridge
+  entrypoint: src/index.tsx
