@@ -14,11 +14,13 @@ import type { EditorFormat } from "@/lib/editor-format";
 
 function FormatButton({
   accessibilityLabel,
+  disabled,
   format,
   onPress,
   children,
 }: {
   accessibilityLabel: string;
+  disabled: boolean;
   format: EditorFormat;
   onPress: (format: EditorFormat) => void;
   children: ReactNode;
@@ -27,9 +29,15 @@ function FormatButton({
     <Pressable
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
       hitSlop={2}
       onPress={() => onPress(format)}
-      style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+      style={({ pressed }) => [
+        styles.button,
+        disabled && styles.buttonDisabled,
+        pressed && styles.buttonPressed,
+      ]}
     >
       {children}
     </Pressable>
@@ -37,9 +45,13 @@ function FormatButton({
 }
 
 export function EditorAccessory({
+  attaching,
+  onAttach,
   onFormat,
   onDismiss,
 }: {
+  attaching: boolean;
+  onAttach: () => void;
   onFormat: (format: EditorFormat) => void;
   onDismiss: () => void;
 }) {
@@ -53,8 +65,23 @@ export function EditorAccessory({
           keyboardShouldPersistTaps="always"
           showsHorizontalScrollIndicator={false}
         >
+          <Pressable
+            accessibilityLabel="Attach file"
+            accessibilityRole="button"
+            disabled={attaching}
+            hitSlop={2}
+            onPress={onAttach}
+            style={({ pressed }) => [
+              styles.button,
+              attaching && styles.buttonDisabled,
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Ionicons name="attach-outline" size={24} color={Colors.ink} />
+          </Pressable>
           <FormatButton
             accessibilityLabel="Heading"
+            disabled={attaching}
             format="heading"
             onPress={onFormat}
           >
@@ -62,6 +89,7 @@ export function EditorAccessory({
           </FormatButton>
           <FormatButton
             accessibilityLabel="Bold"
+            disabled={attaching}
             format="bold"
             onPress={onFormat}
           >
@@ -69,6 +97,7 @@ export function EditorAccessory({
           </FormatButton>
           <FormatButton
             accessibilityLabel="Italic"
+            disabled={attaching}
             format="italic"
             onPress={onFormat}
           >
@@ -76,6 +105,7 @@ export function EditorAccessory({
           </FormatButton>
           <FormatButton
             accessibilityLabel="Bulleted list"
+            disabled={attaching}
             format="bullet"
             onPress={onFormat}
           >
@@ -83,6 +113,7 @@ export function EditorAccessory({
           </FormatButton>
           <FormatButton
             accessibilityLabel="Checklist"
+            disabled={attaching}
             format="checklist"
             onPress={onFormat}
           >
@@ -154,6 +185,9 @@ const styles = StyleSheet.create({
   },
   buttonPressed: {
     backgroundColor: Colors.accentSurface,
+  },
+  buttonDisabled: {
+    opacity: 0.45,
   },
   heading: {
     fontSize: 20,
