@@ -1,4 +1,3 @@
-import { ArrowRight } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { jwtDecode } from "jwt-decode";
@@ -125,10 +124,6 @@ function Component() {
             <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
               Profile
             </h2>
-            <p className="mt-3 max-w-xl text-base leading-7 text-[#4f4940]">
-              The email attached to your account, and how long you've been
-              around.
-            </p>
             <div className="mt-6">
               <ProfileInfoSection email={user?.email} />
             </div>
@@ -138,10 +133,6 @@ function Component() {
             <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
               Refer friends
             </h2>
-            <p className="mt-3 max-w-xl text-base leading-7 text-[#4f4940]">
-              Give a month of Anarlog Pro and get a month when your friend
-              becomes a subscriber.
-            </p>
             <div className="mt-6">
               <ReferralSection ineligible={search.referral === "ineligible"} />
             </div>
@@ -151,10 +142,6 @@ function Component() {
             <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
               Your plan
             </h2>
-            <p className="mt-3 max-w-xl text-base leading-7 text-[#4f4940]">
-              Billing runs through Stripe, and you can also manage it from the
-              desktop app.
-            </p>
             <div className="mt-6">
               <PlanSection />
             </div>
@@ -164,9 +151,6 @@ function Component() {
             <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
               Integrations
             </h2>
-            <p className="mt-3 max-w-xl text-base leading-7 text-[#4f4940]">
-              Calendars and tools connected to Anarlog.
-            </p>
             <div className="mt-6">
               <IntegrationsSection />
             </div>
@@ -176,9 +160,6 @@ function Component() {
             <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
               Synced devices
             </h2>
-            <p className="mt-3 max-w-xl text-base leading-7 text-[#4f4940]">
-              Anarlog syncs up to five devices. Remove one to free a slot.
-            </p>
             <div className="mt-6">
               <DevicesSection />
             </div>
@@ -188,10 +169,6 @@ function Component() {
             <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
               Shared notes
             </h2>
-            <p className="mt-3 max-w-xl text-base leading-7 text-[#4f4940]">
-              Notes you've shared with others. Restricting a note turns off link
-              and public access.
-            </p>
             <div className="mt-6">
               <SharedNotesSection />
             </div>
@@ -201,9 +178,6 @@ function Component() {
             <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
               Cloud API keys
             </h2>
-            <p className="mt-3 max-w-xl text-base leading-7 text-[#4f4940]">
-              Keys that let your own tools talk to the Anarlog Cloud API.
-            </p>
             <div className="mt-6">
               <ApiKeysSection />
             </div>
@@ -213,9 +187,6 @@ function Component() {
             <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
               Session controls
             </h2>
-            <p className="mt-3 max-w-xl text-base leading-7 text-[#4f4940]">
-              Sign out quickly whenever you need to.
-            </p>
             <div className="mt-6">
               <AccountAccessSection />
             </div>
@@ -225,40 +196,9 @@ function Component() {
             <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
               Danger area
             </h2>
-            <p className="mt-3 max-w-xl text-base leading-7 text-[#4f4940]">
-              Account deletion lives here, tucked behind an extra deliberate
-              step.
-            </p>
             <div className="mt-6">
               <DangerAreaSection />
             </div>
-          </section>
-
-          <section>
-            <article
-              className="overflow-hidden rounded-[3px] border border-[#eadfce] bg-[#fffaf0] px-7 py-9 shadow-[0_18px_50px_rgba(68,54,36,0.12)] sm:px-10 sm:py-12"
-              style={{
-                backgroundImage:
-                  "linear-gradient(115deg, rgba(255, 250, 240, 0.9), rgba(246, 236, 218, 0.82)), url('/textures/crumpled-paper.webp')",
-                backgroundPosition: "center",
-                backgroundSize: "cover",
-              }}
-            >
-              <h2 className="font-hand text-3xl leading-none font-semibold text-[#363029]">
-                Anarlog lives on your desktop
-              </h2>
-              <p className="mt-4 max-w-xl text-base leading-7 text-[#363029]">
-                Notes, transcripts, and integrations all live in the app, on
-                your device. Grab it if you haven't already.
-              </p>
-              <Link
-                to="/download/"
-                className="mt-6 inline-flex items-center gap-2 rounded-full bg-[#181613] px-5 py-3 text-sm font-medium text-white"
-              >
-                <span>Download for free</span>
-                <ArrowRight size={16} weight="bold" aria-hidden="true" />
-              </Link>
-            </article>
           </section>
         </div>
       </div>
