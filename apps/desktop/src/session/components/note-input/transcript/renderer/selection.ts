@@ -1,4 +1,4 @@
-import type { SegmentKey } from "~/stt/live-segment";
+import type { Segment, SegmentKey } from "~/stt/live-segment";
 
 export type TranscriptWordSelectionGroup = {
   transcriptId: string;
@@ -150,6 +150,66 @@ export function getTranscriptContextSelection({
   return selection ? { range, selection } : null;
 }
 
+export function getTranscriptSegmentDomId(
+  transcriptId: string,
+  segment: Pick<Segment, "id" | "start_ms" | "end_ms" | "words">,
+) {
+  return (
+    segment.id ||
+    `${transcriptId}:${segment.words[0]?.id ?? segment.start_ms}:${segment.words[segment.words.length - 1]?.id ?? segment.end_ms}`
+  );
+}
+
+export function getTranscriptSectionKey(
+  transcriptId: string,
+  segmentId: string,
+) {
+  return `${transcriptId}:${segmentId}`;
+}
+
+export function getTranscriptSectionKeyFromElement(section: HTMLElement) {
+  const transcriptId = section.dataset.transcriptId;
+  const segmentId = section.dataset.transcriptSegmentId;
+  return transcriptId && segmentId
+    ? getTranscriptSectionKey(transcriptId, segmentId)
+    : null;
+}
+
+export function getTranscriptSelectionFromSegment({
+  transcriptId,
+  sessionId,
+  offsetMs,
+  segment,
+}: {
+  transcriptId: string;
+  sessionId?: string;
+  offsetMs: number;
+  segment: Pick<Segment, "key" | "text" | "words">;
+}): TranscriptWordSelection | null {
+  const wordIds = segment.words
+    .map((word) => word.id)
+    .filter(
+      (wordId): wordId is string =>
+        typeof wordId === "string" && wordId.length > 0,
+    );
+  if (wordIds.length === 0) {
+    return null;
+  }
+
+  return {
+    sessionId,
+    text: segment.text.trim(),
+    startMs: offsetMs + (segment.words[0]?.start_ms ?? 0),
+    groups: [
+      {
+        transcriptId,
+        segmentKey: segment.key,
+        wordIds,
+      },
+    ],
+  };
+}
+
 export function getTranscriptSectionSelection(
   section: HTMLElement,
   container: HTMLElement,
@@ -196,6 +256,68 @@ export function mergeTranscriptSelections(
     startMs: Math.min(...selections.map((selection) => selection.startMs)),
     groups: [...groups.values()],
   };
+}
+
+const LIVE_TRANSCRIPT_PLACEHOLDER_ID = "__live-transcript__";
+
+export function canMergeTranscriptEntries(
+  selectedKeys: ReadonlySet<string>,
+  order: string[],
+  entries: Map<string, TranscriptWordSelection>,
+) {
+  return getTranscriptMergeTarget(selectedKeys, order, entries) != null;
+}
+
+export function getTranscriptMergeTarget(
+  selectedKeys: ReadonlySet<string>,
+  order: string[],
+  entries: Map<string, TranscriptWordSelection>,
+) {
+  if (selectedKeys.size < 2) {
+    return null;
+  }
+
+  const indexes = order.flatMap((key, index) =>
+    selectedKeys.has(key) ? [index] : [],
+  );
+  if (indexes.length !== selectedKeys.size) {
+    return null;
+  }
+
+  for (let index = 1; index < indexes.length; index += 1) {
+    if (indexes[index] !== indexes[index - 1]! + 1) {
+      return null;
+    }
+  }
+
+  const firstKey = order[indexes[0]!];
+  const first = firstKey ? (entries.get(firstKey) ?? null) : null;
+  const targetGroup = first?.groups[0];
+  if (!first || !targetGroup) {
+    return null;
+  }
+  if (targetGroup.transcriptId === LIVE_TRANSCRIPT_PLACEHOLDER_ID) {
+    return null;
+  }
+  if (
+    !targetGroup.segmentKey.speaker_human_id &&
+    typeof targetGroup.segmentKey.speaker_index !== "number"
+  ) {
+    return null;
+  }
+
+  for (const index of indexes) {
+    const group = entries.get(order[index]!)?.groups[0];
+    if (
+      !group ||
+      group.transcriptId !== targetGroup.transcriptId ||
+      group.segmentKey.channel !== targetGroup.segmentKey.channel
+    ) {
+      return null;
+    }
+  }
+
+  return first;
 }
 
 function readSegmentKey(element: HTMLElement): SegmentKey | undefined {
