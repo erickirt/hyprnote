@@ -1060,3 +1060,236 @@ async fn e2ee_dirty_triggers_apply_to_initialized_cloudsync_tables() {
     .unwrap();
     assert_eq!(generation, 1);
 }
+
+async fn e2ee_schema_objects(db: &Db) -> Vec<(String, String, String)> {
+    sqlx::query_as(
+        "SELECT type, name, sql FROM sqlite_master
+         WHERE type IN ('view', 'trigger') AND name LIKE 'e2ee_%'
+         ORDER BY type, name",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn torn_e2ee_payload_hash_local_state_migration_is_repaired() {
+    let migration_sql =
+        include_str!("../../migrations/20260816100100_e2ee_payload_hash_local_state.sql");
+    let clean_db = test_db().await;
+
+    // A pre-transactional 1.4.10 runner force-quit mid-migration leaves the
+    // column dropped with no history row: either nothing recreated yet, or
+    // some views/triggers (including a non-IF-EXISTS trigger) already back.
+    for cut_marker in [
+        "CREATE VIEW e2ee_local_state_resolved",
+        "CREATE TRIGGER e2ee_replica_payload_hash_update",
+    ] {
+        let db = Db::connect_memory_plain().await.unwrap();
+        anlg_db_migrate::migrate(
+            &db,
+            anlg_db_migrate::DbSchema {
+                steps: migration_steps_before("20260816100100_e2ee_payload_hash_local_state"),
+                validate_cloudsync_table: cloudsync_alter_guard_required,
+            },
+        )
+        .await
+        .unwrap();
+
+        let cut = migration_sql.find(cut_marker).unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&migration_sql[..cut]))
+            .execute(db.pool())
+            .await
+            .unwrap();
+
+        prepare_schema(&db).await.unwrap();
+
+        let (success, checksum): (bool, Vec<u8>) = sqlx::query_as(
+            "SELECT success, checksum FROM _sqlx_migrations WHERE version = 20260816100100",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert!(success);
+        assert_eq!(checksum, migration_checksum(migration_sql));
+
+        let payload_hash_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('e2ee_records') WHERE name = 'payload_hash'
+            )",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert!(!payload_hash_exists);
+
+        assert_eq!(
+            e2ee_schema_objects(&db).await,
+            e2ee_schema_objects(&clean_db).await
+        );
+    }
+}
+
+// The prebuilt sqlite-sync extension only ships for these targets.
+#[cfg(any(
+    all(test, target_os = "macos", target_arch = "aarch64"),
+    all(test, target_os = "macos", target_arch = "x86_64"),
+    all(test, target_os = "linux", target_env = "gnu", target_arch = "aarch64"),
+    all(test, target_os = "linux", target_env = "gnu", target_arch = "x86_64"),
+    all(
+        test,
+        target_os = "linux",
+        target_env = "musl",
+        target_arch = "aarch64"
+    ),
+    all(test, target_os = "linux", target_env = "musl", target_arch = "x86_64"),
+    all(test, target_os = "windows", target_arch = "x86_64"),
+))]
+#[tokio::test]
+async fn torn_e2ee_payload_hash_repair_refreshes_the_cloudsync_schema_hash() {
+    async fn open_cloudsync_db(path: &std::path::Path) -> Db {
+        Db::open(anlg_db_core::DbOpenOptions {
+            storage: anlg_db_core::DbStorage::Local(path),
+            cloudsync_enabled: true,
+            journal_mode_wal: true,
+            foreign_keys: true,
+            max_connections: Some(1),
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn migrate_until_before_torn_step(db: &Db) {
+        anlg_db_migrate::migrate(
+            db,
+            anlg_db_migrate::DbSchema {
+                steps: migration_steps_before("20260816100100_e2ee_payload_hash_local_state"),
+                validate_cloudsync_table: cloudsync_alter_guard_required,
+            },
+        )
+        .await
+        .unwrap();
+        db.cloudsync_init("e2ee_records", None, None).await.unwrap();
+    }
+
+    async fn latest_cloudsync_schema_hash(db: &Db) -> i64 {
+        sqlx::query_scalar("SELECT hash FROM cloudsync_schema_versions ORDER BY seq DESC LIMIT 1")
+            .fetch_one(db.pool())
+            .await
+            .unwrap()
+    }
+
+    let migration_sql =
+        include_str!("../../migrations/20260816100100_e2ee_payload_hash_local_state.sql");
+
+    // Reference: the same migration applied through the CloudsyncAlter runner
+    // records the schema hash of the post-drop e2ee_records table.
+    let clean_dir = tempfile::tempdir().unwrap();
+    let clean_hash = {
+        let db = open_cloudsync_db(&clean_dir.path().join("app.db")).await;
+        migrate_until_before_torn_step(&db).await;
+        prepare_schema(&db).await.unwrap();
+        let hash = latest_cloudsync_schema_hash(&db).await;
+        db.pool().close().await;
+        hash
+    };
+
+    // Torn 1.4.10 run: cloudsync_begin_alter dropped the change-tracking
+    // triggers, the ALTER plus part of the DDL committed, and the process died
+    // before cloudsync_commit_alter recorded the post-drop schema hash.
+    let torn_dir = tempfile::tempdir().unwrap();
+    let torn_path = torn_dir.path().join("app.db");
+    {
+        let db = open_cloudsync_db(&torn_path).await;
+        migrate_until_before_torn_step(&db).await;
+
+        let mut conn = db.pool().acquire().await.unwrap();
+        anlg_db_core::cloudsync_begin_alter_on(&mut *conn, "e2ee_records")
+            .await
+            .unwrap();
+        let cut = migration_sql
+            .find("CREATE VIEW e2ee_local_state_resolved")
+            .unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&migration_sql[..cut]))
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        sqlx::query("RELEASE SAVEPOINT cloudsync_alter")
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        drop(conn);
+        db.pool().close().await;
+    }
+
+    let db = open_cloudsync_db(&torn_path).await;
+    let stale_hash = latest_cloudsync_schema_hash(&db).await;
+    assert_ne!(stale_hash, clean_hash, "torn setup must leave a stale hash");
+
+    prepare_schema(&db).await.unwrap();
+
+    let repaired: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM _sqlx_migrations WHERE version = 20260816100100 AND success = 1
+        )",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(repaired);
+    assert_eq!(latest_cloudsync_schema_hash(&db).await, clean_hash);
+}
+
+#[tokio::test]
+async fn e2ee_payload_hash_repair_ignores_databases_before_the_column_existed() {
+    let db = Db::connect_memory_plain().await.unwrap();
+    anlg_db_migrate::migrate(
+        &db,
+        anlg_db_migrate::DbSchema {
+            steps: migration_steps_before("20260815100300_e2ee_record_payload_hash"),
+            validate_cloudsync_table: cloudsync_alter_guard_required,
+        },
+    )
+    .await
+    .unwrap();
+
+    repair_torn_e2ee_payload_hash_local_state_migration(&db)
+        .await
+        .unwrap();
+
+    let row_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM _sqlx_migrations WHERE version = 20260816100100)",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(
+        !row_exists,
+        "repair must not pre-record an unapplied migration"
+    );
+
+    prepare_schema(&db).await.unwrap();
+}
+
+#[tokio::test]
+async fn e2ee_payload_hash_repair_leaves_cleanly_migrated_databases_alone() {
+    let db = test_db().await;
+    let before = e2ee_schema_objects(&db).await;
+    let checksum_before: Vec<u8> =
+        sqlx::query_scalar("SELECT checksum FROM _sqlx_migrations WHERE version = 20260816100100")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+
+    repair_torn_e2ee_payload_hash_local_state_migration(&db)
+        .await
+        .unwrap();
+
+    let checksum_after: Vec<u8> =
+        sqlx::query_scalar("SELECT checksum FROM _sqlx_migrations WHERE version = 20260816100100")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(checksum_before, checksum_after);
+    assert_eq!(before, e2ee_schema_objects(&db).await);
+}
