@@ -3293,6 +3293,7 @@ msgid "Resend invite"
 msgstr ""
 
 #: src/calendar/components/apple/permission.tsx
+#: src/settings/ai/shared/index.tsx
 msgid "Reset"
 msgstr ""
 
