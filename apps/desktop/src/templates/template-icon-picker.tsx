@@ -143,6 +143,7 @@ function SearchField({
   onChange: (value: string) => void;
   placeholder: string;
 }) {
+  const { t } = useLingui();
   return (
     <div className="border-border flex h-12 items-center gap-2 border-b px-4">
       <MagnifyingGlass className="text-muted-foreground size-4 shrink-0" />
@@ -158,7 +159,7 @@ function SearchField({
           type="button"
           onClick={() => onChange("")}
           className="hover:bg-accent rounded-sm p-1"
-          aria-label="Clear search"
+          aria-label={t`Clear search`}
         >
           <X className="text-muted-foreground size-3.5" />
         </button>
