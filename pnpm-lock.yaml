@@ -588,8 +588,8 @@ importers:
         specifier: ^3.21.0
         version: 3.21.0
       hono:
-        specifier: ^4.12.12
-        version: 4.12.12
+        specifier: ^4.12.34
+        version: 4.13.3
       pg:
         specifier: ^8.20.0
         version: 8.20.0
@@ -12246,6 +12246,10 @@ packages:
 
   hono@4.12.12:
     resolution: {integrity: sha512-p1JfQMKaceuCbpJKAPKVqyqviZdS0eUxH9v82oWo1kb9xjQ5wA6iP3FNVAPDFlz5/p7d45lO+BpSk1tuSZMF4Q==}
+    engines: {node: '>=16.9.0'}
+
+  hono@4.13.3:
+    resolution: {integrity: sha512-r8AO2mYHoLxSHkgafNeC/BXyb2vWRxD3jem4Ts+ptav8oTG5FIRifAjuJEmZI4bSvvc2ns0GxmIYiZnHqN3mMw==}
     engines: {node: '>=16.9.0'}
 
   hosted-git-info@7.0.2:
@@ -24378,7 +24382,9 @@ snapshots:
       metro-runtime: 0.84.4
     transitivePeerDependencies:
       - '@babel/core'
+      - bufferutil
       - supports-color
+      - utf-8-validate
 
   '@react-native/normalize-colors@0.74.89': {}
 
@@ -30345,6 +30351,8 @@ snapshots:
       react-is: 16.13.1
 
   hono@4.12.12: {}
+
+  hono@4.13.3: {}
 
   hosted-git-info@7.0.2:
     dependencies:
