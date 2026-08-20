@@ -20,6 +20,7 @@ import {
   getSupabaseAdminClient,
   getSupabaseServerClient,
 } from "@/functions/supabase";
+import { getSubscriptionAccessEnd } from "@/lib/account-plan";
 import {
   addInternalReturnPathSearch,
   sanitizeInternalReturnPath,
@@ -40,6 +41,12 @@ import {
   startWorkspaceCheckout,
   type WorkspaceCheckoutContext,
 } from "@/lib/workspace-checkout";
+import { isYcPromotionCode, normalizeYcPromotionCode } from "@/lib/yc-perk";
+import {
+  applyYcPromotionToCustomer,
+  findYcPromotionCodeByCustomerCode,
+  subscriptionHasYcPerk,
+} from "@/lib/yc-perk-apply";
 
 type SupabaseClient = ReturnType<typeof getSupabaseServerClient>;
 
@@ -71,7 +78,7 @@ class TrialCheckoutCreationError extends Error {
   }
 }
 
-const getStripeCustomerIdForUser = async (
+export const getStripeCustomerIdForUser = async (
   supabase: SupabaseClient,
   stripe: Stripe,
   user: AuthUser,
@@ -161,11 +168,13 @@ const getProPriceId = (period: "monthly" | "yearly") => {
 async function getCurrentSubscription(
   stripe: Stripe,
   stripeCustomerId: string,
+  options?: { expandDiscounts?: boolean },
 ): Promise<Stripe.Subscription | null> {
   const subscriptions = await stripe.subscriptions.list({
     customer: stripeCustomerId,
     status: "all",
     limit: 10,
+    ...(options?.expandDiscounts ? { expand: ["data.discounts"] } : {}),
   });
 
   return (
@@ -262,6 +271,19 @@ async function ensureStripeCustomerId(
   return assignedCustomerId;
 }
 
+const ycPerkReturnSchema = z.enum(["applied", "claimed", "invalid"]);
+
+function getAccountYcPerkUrl(
+  scheme: z.infer<typeof desktopSchemeSchema> | undefined,
+  perk: z.infer<typeof ycPerkReturnSchema>,
+) {
+  if (scheme) {
+    return `${getBillingReturnUrl(scheme)}&perk=${perk}`;
+  }
+
+  return `${getRequestAppOrigin()}/app/account?perk=${perk}`;
+}
+
 async function createCheckoutUrl({
   supabase,
   user,
@@ -272,6 +294,7 @@ async function createCheckoutUrl({
   trialDays,
   source = "unknown",
   returnTo,
+  promotionCodeId,
 }: {
   supabase: SupabaseClient;
   user: AuthUser & { email?: string | null };
@@ -282,6 +305,7 @@ async function createCheckoutUrl({
   trialDays?: number;
   source?: CheckoutSource;
   returnTo?: string;
+  promotionCodeId?: string;
 }) {
   const stripe = getStripeClient();
   const stripeCustomerId = await ensureStripeCustomerId(supabase, user);
@@ -335,7 +359,9 @@ async function createCheckoutUrl({
           },
         ],
         mode: "subscription",
-        allow_promotion_codes: trial ? undefined : true,
+        ...(promotionCodeId
+          ? { discounts: [{ promotion_code: promotionCodeId }] }
+          : { allow_promotion_codes: trial ? undefined : true }),
         payment_method_collection: trial
           ? WEB_TRIAL_CHECKOUT_FIELDS.payment_method_collection
           : undefined,
@@ -394,6 +420,12 @@ const createCheckoutSessionInput = z.object({
   trial: z.boolean().default(false),
   source: checkoutSourceSchema.default("unknown"),
   returnTo: z.string().optional(),
+  code: z
+    .string()
+    .trim()
+    .max(64)
+    .optional()
+    .transform((value) => (value ? value : undefined)),
 });
 
 export const createCheckoutSession = createServerFn({ method: "POST" })
@@ -435,6 +467,24 @@ export const createCheckoutSession = createServerFn({ method: "POST" })
 
     try {
       const stripe = getStripeClient();
+      const checkoutCode =
+        !data.trial && data.code ? data.code.trim() : undefined;
+      let ycPromotion: Awaited<
+        ReturnType<typeof findYcPromotionCodeByCustomerCode>
+      > = null;
+
+      if (checkoutCode) {
+        if (!isYcPromotionCode(checkoutCode)) {
+          return { url: getAccountYcPerkUrl(data.scheme, "invalid") };
+        }
+        ycPromotion = await findYcPromotionCodeByCustomerCode(
+          stripe,
+          normalizeYcPromotionCode(checkoutCode),
+        );
+        if (!ycPromotion) {
+          return { url: getAccountYcPerkUrl(data.scheme, "invalid") };
+        }
+      }
 
       const stripeCustomerId = await getStripeCustomerIdForUser(
         supabase,
@@ -452,17 +502,35 @@ export const createCheckoutSession = createServerFn({ method: "POST" })
           if (reservationId) {
             await releaseTrialReservation(user.id, reservationId);
           }
-          const returnUrl = data.scheme
-            ? `${getBillingReturnUrl(data.scheme)}&source=${data.source}`
-            : toAbsoluteInternalReturnUrl(getRequestAppOrigin(), returnTo);
-          const portalSession = await stripe.billingPortal.sessions.create({
-            customer: stripeCustomerId,
-            return_url: returnUrl,
-            ...(activeSubscription.status === "trialing"
-              ? { flow_data: paymentMethodUpdateFlow(returnUrl) }
-              : {}),
-          });
-          return { url: portalSession.url };
+
+          if (ycPromotion) {
+            const result = await applyYcPromotionToCustomer({
+              stripe,
+              customerId: stripeCustomerId,
+              promotion: ycPromotion,
+            });
+            if (result.status === "claimed") {
+              return { url: getAccountYcPerkUrl(data.scheme, "claimed") };
+            }
+            if (
+              result.status === "applied" ||
+              result.status === "already_applied"
+            ) {
+              return { url: getAccountYcPerkUrl(data.scheme, "applied") };
+            }
+          } else {
+            const returnUrl = data.scheme
+              ? `${getBillingReturnUrl(data.scheme)}&source=${data.source}`
+              : toAbsoluteInternalReturnUrl(getRequestAppOrigin(), returnTo);
+            const portalSession = await stripe.billingPortal.sessions.create({
+              customer: stripeCustomerId,
+              return_url: returnUrl,
+              ...(activeSubscription.status === "trialing"
+                ? { flow_data: paymentMethodUpdateFlow(returnUrl) }
+                : {}),
+            });
+            return { url: portalSession.url };
+          }
         }
       }
 
@@ -476,6 +544,7 @@ export const createCheckoutSession = createServerFn({ method: "POST" })
         trialDays,
         source: data.source,
         returnTo,
+        promotionCodeId: ycPromotion?.id,
       });
     } catch (error) {
       if (reservationId && !(error instanceof TrialCheckoutCreationError)) {
@@ -822,16 +891,7 @@ export const syncAfterSuccess = createServerFn({ method: "POST" }).handler(
       return { status: "none" };
     }
 
-    const subscriptions = await stripe.subscriptions.list({
-      customer: stripeCustomerId,
-      status: "all",
-    });
-
-    // Prioritize active subscriptions over trialing ones
-    // This ensures paid users see "active" status even if they had a previous trial
-    const subscription =
-      subscriptions.data.find((sub) => sub.status === "active") ||
-      subscriptions.data.find((sub) => sub.status === "trialing");
+    const subscription = await getCurrentSubscription(stripe, stripeCustomerId);
 
     if (!subscription) {
       return { status: "none" };
@@ -842,6 +902,55 @@ export const syncAfterSuccess = createServerFn({ method: "POST" }).handler(
       status: subscription.status,
       priceId: subscription.items.data[0]?.price.id ?? null,
       cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      currentPeriodEnd: getSubscriptionAccessEnd(subscription),
+    };
+  },
+);
+
+export const getAccountSubscription = createServerFn({ method: "GET" }).handler(
+  async () => {
+    const supabase = getSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user?.id) {
+      throw new Error("Unauthorized");
+    }
+
+    const stripe = getStripeClient();
+    const stripeCustomerId = await getStripeCustomerIdForUser(
+      supabase,
+      stripe,
+      user,
+    );
+
+    if (!stripeCustomerId) {
+      return {
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: null,
+        hasYcPerk: false,
+      };
+    }
+
+    const subscription = await getCurrentSubscription(
+      stripe,
+      stripeCustomerId,
+      { expandDiscounts: true },
+    );
+
+    if (!subscription) {
+      return {
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: null,
+        hasYcPerk: false,
+      };
+    }
+
+    return {
+      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      currentPeriodEnd: getSubscriptionAccessEnd(subscription),
+      hasYcPerk: subscriptionHasYcPerk(subscription),
     };
   },
 );

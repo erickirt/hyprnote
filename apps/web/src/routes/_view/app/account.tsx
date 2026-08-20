@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { jwtDecode } from "jwt-decode";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { z } from "zod";
 
 import { deriveBillingInfo, type SupabaseJwtPayload } from "@anlg/supabase";
@@ -10,6 +10,14 @@ import { AnarlogLogo } from "@/components/anarlog-logo";
 import { desktopSchemeSchema } from "@/functions/desktop-flow";
 import { getSupabaseBrowserClient } from "@/functions/supabase";
 import { useAnalytics } from "@/hooks/use-posthog";
+import {
+  ACCOUNT_SECTIONS,
+  type AccountSectionId,
+  type AccountTabId,
+  accountTabForSection,
+  resolveAccountTab,
+  sectionsForAccountTab,
+} from "@/lib/account-tabs";
 import { checkoutSourceSchema } from "@/lib/checkout-source";
 
 import { AccountAccessSection } from "./-account-access";
@@ -17,6 +25,7 @@ import { ApiKeysSection } from "./-account-api-keys";
 import { DangerAreaSection } from "./-account-danger";
 import { DevicesSection } from "./-account-devices";
 import { IntegrationsSection } from "./-account-integrations";
+import { AccountTabs } from "./-account-nav";
 import { PlanSection } from "./-account-plan";
 import { ProfileInfoSection } from "./-account-profile-info";
 import { ReferralSection } from "./-account-referrals";
@@ -32,6 +41,8 @@ const validateSearch = z
     checkout_type: z.enum(["trial", "paid"]),
     source: checkoutSourceSchema,
     referral: z.enum(["ineligible"]),
+    perk: z.enum(["applied", "claimed", "invalid"]),
+    tab: z.enum(["account", "connections", "developer"]),
   })
   .partial();
 
@@ -44,8 +55,11 @@ export const Route = createFileRoute("/_view/app/account")({
 function Component() {
   const { user } = Route.useLoaderData();
   const search = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
   const { identify: identifyPosthog, track } = useAnalytics();
   const queryClient = useQueryClient();
+  const [hash, setHash] = useState("");
+  const activeTab = resolveAccountTab({ tab: search.tab, hash });
 
   useEffect(() => {
     if (!search.success && search.trial !== "started") {
@@ -100,6 +114,35 @@ function Component() {
     track,
   ]);
 
+  useEffect(() => {
+    const syncHash = () => setHash(window.location.hash);
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+    return () => window.removeEventListener("hashchange", syncHash);
+  }, []);
+
+  useEffect(() => {
+    const sectionId = hash.replace(/^#/, "");
+    if (!sectionId || accountTabForSection(sectionId) !== activeTab) {
+      return;
+    }
+
+    document.getElementById(sectionId)?.scrollIntoView({ block: "start" });
+  }, [activeTab, hash]);
+
+  const selectTab = (tabId: AccountTabId) => {
+    setHash("");
+    void navigate({
+      search: (prev) => ({
+        ...prev,
+        tab: tabId === "account" ? undefined : tabId,
+      }),
+      // Empty string is treated as omitted and would keep the current hash.
+      hash: () => "",
+      replace: true,
+    });
+  };
+
   return (
     <main className="min-h-screen bg-white text-[#181613]">
       <div className="mx-auto w-full max-w-[700px] px-5 pt-10 pb-16 md:px-8 md:pt-12 md:pb-24">
@@ -119,89 +162,82 @@ function Component() {
           </h1>
         </header>
 
-        <div className="mt-14 flex flex-col gap-14 md:mt-16">
-          <section>
-            <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
-              Profile
-            </h2>
-            <div className="mt-6">
-              <ProfileInfoSection email={user?.email} />
-            </div>
-          </section>
+        <div className="mt-10 md:mt-12 lg:mt-16">
+          <div className="sticky top-0 z-10 -mx-5 border-b border-[#ede7dc] bg-white px-5 py-3 md:-mx-8 md:px-8">
+            <AccountTabs activeId={activeTab} onSelect={selectTab} />
+          </div>
 
-          <section id="referrals" className="scroll-mt-8">
-            <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
-              Refer friends
-            </h2>
-            <div className="mt-6">
-              <ReferralSection ineligible={search.referral === "ineligible"} />
-            </div>
-          </section>
-
-          <section>
-            <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
-              Your plan
-            </h2>
-            <div className="mt-6">
-              <PlanSection />
-            </div>
-          </section>
-
-          <section>
-            <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
-              Integrations
-            </h2>
-            <div className="mt-6">
-              <IntegrationsSection />
-            </div>
-          </section>
-
-          <section>
-            <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
-              Synced devices
-            </h2>
-            <div className="mt-6">
-              <DevicesSection />
-            </div>
-          </section>
-
-          <section>
-            <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
-              Shared notes
-            </h2>
-            <div className="mt-6">
-              <SharedNotesSection />
-            </div>
-          </section>
-
-          <section>
-            <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
-              Cloud API keys
-            </h2>
-            <div className="mt-6">
-              <ApiKeysSection />
-            </div>
-          </section>
-
-          <section>
-            <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
-              Session controls
-            </h2>
-            <div className="mt-6">
-              <AccountAccessSection />
-            </div>
-          </section>
-
-          <section>
-            <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
-              Danger area
-            </h2>
-            <div className="mt-6">
-              <DangerAreaSection />
-            </div>
-          </section>
+          <div
+            role="tabpanel"
+            id={`account-tabpanel-${activeTab}`}
+            aria-labelledby={`account-tab-${activeTab}`}
+            className="mt-10 flex min-w-0 flex-col gap-14"
+          >
+            {sectionsForAccountTab(activeTab).map((section) => (
+              <AccountSection key={section.id} id={section.id}>
+                <AccountSectionBody
+                  id={section.id}
+                  email={user?.email}
+                  perk={search.perk}
+                  referralIneligible={search.referral === "ineligible"}
+                />
+              </AccountSection>
+            ))}
+          </div>
         </div>
       </div>
     </main>
   );
+}
+
+function AccountSection({
+  id,
+  children,
+}: {
+  id: AccountSectionId;
+  children: React.ReactNode;
+}) {
+  const title = ACCOUNT_SECTIONS.find((section) => section.id === id)?.label;
+
+  return (
+    <section id={id} className="scroll-mt-20">
+      <h2 className="font-hand text-3xl leading-none font-semibold text-[#756b5d]">
+        {title}
+      </h2>
+      <div className="mt-6">{children}</div>
+    </section>
+  );
+}
+
+function AccountSectionBody({
+  id,
+  email,
+  perk,
+  referralIneligible,
+}: {
+  id: AccountSectionId;
+  email?: string;
+  perk?: "applied" | "claimed" | "invalid";
+  referralIneligible: boolean;
+}) {
+  switch (id) {
+    case "profile":
+      return <ProfileInfoSection email={email} />;
+    case "plan":
+      return <PlanSection perk={perk} />;
+    case "referrals":
+      return <ReferralSection ineligible={referralIneligible} />;
+    case "integrations":
+      return <IntegrationsSection />;
+    case "devices":
+      return <DevicesSection />;
+    case "shares":
+      return <SharedNotesSection />;
+    case "api-keys":
+      return <ApiKeysSection />;
+    case "session":
+      return <AccountAccessSection />;
+    case "danger":
+      return <DangerAreaSection />;
+  }
 }
