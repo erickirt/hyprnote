@@ -42,6 +42,7 @@ anlg-api-cloud = { path = "crates/api-cloud", package = "api-cloud" }
 anlg-api-env = { path = "crates/api-env", package = "api-env" }
 anlg-api-error = { path = "crates/api-error", package = "api-error" }
 anlg-api-mail = { path = "crates/api-mail", package = "api-mail" }
+anlg-api-meeting-import = { path = "crates/api-meeting-import", package = "api-meeting-import" }
 anlg-api-messenger = { path = "crates/api-messenger", package = "api-messenger" }
 anlg-api-nango = { path = "crates/api-nango", package = "api-nango" }
 anlg-api-notion = { path = "crates/api-notion", package = "api-notion" }
@@ -51,6 +52,7 @@ anlg-api-storage = { path = "crates/api-storage", package = "api-storage" }
 anlg-api-subscription = { path = "crates/api-subscription", package = "api-subscription" }
 anlg-api-sync = { path = "crates/api-sync", package = "api-sync" }
 anlg-api-ticket = { path = "crates/api-ticket", package = "api-ticket" }
+anlg-api-zoom = { path = "crates/api-zoom", package = "api-zoom" }
 anlg-apple-calendar = { path = "crates/apple-calendar", package = "apple-calendar" }
 anlg-apple-note = { path = "crates/apple-note", package = "apple-note" }
 anlg-apple-todo = { path = "crates/apple-todo", package = "apple-todo" }
@@ -133,6 +135,7 @@ anlg-loops = { path = "crates/loops", package = "loops" }
 anlg-mac = { path = "crates/mac", package = "mac" }
 anlg-mcp = { path = "crates/mcp", package = "mcp" }
 anlg-meeting-capture = { path = "crates/meeting-capture", package = "meeting-capture" }
+anlg-meeting-import = { path = "crates/meeting-import", package = "meeting-import" }
 anlg-mobile-bridge = { path = "crates/mobile-bridge", package = "mobile-bridge" }
 anlg-model-downloader = { path = "crates/model-downloader", package = "model-downloader" }
 anlg-model-manager = { path = "crates/model-manager", package = "model-manager" }
@@ -192,6 +195,7 @@ anlg-whisper-local = { path = "crates/whisper-local", package = "whisper-local" 
 anlg-whisper-local-model = { path = "crates/whisper-local-model", package = "whisper-local-model" }
 anlg-ws-client = { path = "crates/ws-client", package = "ws-client" }
 anlg-ws-utils = { path = "crates/ws-utils", package = "ws-utils" }
+anlg-zoom = { path = "crates/zoom", package = "zoom" }
 keyring = "4.1.4"
 legacy-db-core = { path = "legacy/db-core", package = "legacy-db-core" }
 legacy-db-parser = { path = "legacy/db-parser", package = "db-parser" }

@@ -7,8 +7,11 @@ edition = "2024"
 anlg-api-auth = { workspace = true }
 anlg-api-error = { workspace = true }
 anlg-api-nango = { workspace = true }
+anlg-meeting-import = { workspace = true }
+anlg-nango = { workspace = true }
 
 axum = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -5,9 +5,11 @@ export type MeetingImportProvider = {
   name: string;
   access: "API" | "CLI" | "Export" | "MCP" | "OAuth" | "Webhook";
   helpUrl: string;
-  directImport?: "mcp-oauth";
+  directImport?: "cli" | "mcp-oauth" | "nango-oauth";
+  nangoIntegrationId?: string;
   nativeNames?: string[];
   bundleIds?: string[];
+  alwaysAvailable?: boolean;
 };
 
 export type DetectedMeetingImportProvider = MeetingImportProvider & {
@@ -56,6 +58,8 @@ export const MEETING_IMPORT_PROVIDERS: MeetingImportProvider[] = [
     name: "Fathom",
     access: "OAuth",
     helpUrl: "https://developers.fathom.ai/sdks/oauth",
+    directImport: "nango-oauth",
+    nangoIntegrationId: "fathom",
     nativeNames: ["Fathom"],
     bundleIds: ["Fathom"],
   },
@@ -73,6 +77,8 @@ export const MEETING_IMPORT_PROVIDERS: MeetingImportProvider[] = [
     name: "Notion AI Meeting Notes",
     access: "OAuth",
     helpUrl: "https://developers.notion.com/reference/query-meeting-notes",
+    directImport: "nango-oauth",
+    nangoIntegrationId: "notion",
     nativeNames: ["Notion"],
     bundleIds: ["notion.id", "notion"],
   },
@@ -161,6 +167,7 @@ export const MEETING_IMPORT_PROVIDERS: MeetingImportProvider[] = [
     access: "CLI",
     helpUrl:
       "https://support.plaud.ai/hc/en-us/articles/57751026815257-Plaud-CLI",
+    directImport: "cli",
     nativeNames: ["Plaud"],
     bundleIds: ["ai.plaud.desktop.plaud"],
   },
@@ -169,6 +176,8 @@ export const MEETING_IMPORT_PROVIDERS: MeetingImportProvider[] = [
     name: "Zoom",
     access: "OAuth",
     helpUrl: "https://developers.zoom.us/docs/api/meetings/",
+    directImport: "nango-oauth",
+    nangoIntegrationId: "zoom",
     nativeNames: ["zoom.us", "Zoom", "Zoom Workplace"],
     bundleIds: ["us.zoom.xos"],
   },
@@ -178,6 +187,8 @@ export const MEETING_IMPORT_PROVIDERS: MeetingImportProvider[] = [
     access: "OAuth",
     helpUrl:
       "https://learn.microsoft.com/en-us/graph/api/onlinemeeting-list-transcripts?view=graph-rest-1.0",
+    directImport: "nango-oauth",
+    nangoIntegrationId: "microsoft-teams",
     nativeNames: ["Microsoft Teams", "Microsoft Teams (work or school)"],
     bundleIds: ["com.microsoft.teams", "com.microsoft.teams2"],
   },
@@ -187,6 +198,10 @@ export const MEETING_IMPORT_PROVIDERS: MeetingImportProvider[] = [
     access: "OAuth",
     helpUrl:
       "https://developers.google.com/workspace/meet/api/guides/artifacts",
+    directImport: "nango-oauth",
+    nangoIntegrationId: "google-meet",
+    nativeNames: ["Google Meet"],
+    alwaysAvailable: true,
   },
   {
     id: "webex",
@@ -194,6 +209,8 @@ export const MEETING_IMPORT_PROVIDERS: MeetingImportProvider[] = [
     access: "OAuth",
     helpUrl:
       "https://developer.webex.com/meeting/docs/api/v1/meeting-transcripts",
+    directImport: "nango-oauth",
+    nangoIntegrationId: "webex",
     nativeNames: ["Webex", "Cisco Webex Meetings"],
     bundleIds: ["com.cisco.webex", "com.webex"],
   },
@@ -284,6 +301,8 @@ export function detectMeetingImportProviders(
 
     return installedApp
       ? [{ ...provider, installedAppId: installedApp.id }]
-      : [];
+      : provider.alwaysAvailable
+        ? [{ ...provider, installedAppId: provider.id }]
+        : [];
   });
 }

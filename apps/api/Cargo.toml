@@ -10,6 +10,7 @@ anlg-api-calendar = { workspace = true }
 anlg-api-cloud = { workspace = true }
 anlg-api-env = { workspace = true }
 anlg-api-mail = { workspace = true }
+anlg-api-meeting-import = { workspace = true }
 anlg-api-messenger = { workspace = true }
 anlg-api-nango = { workspace = true }
 anlg-api-notion = { workspace = true }
@@ -18,6 +19,7 @@ anlg-api-research = { workspace = true }
 anlg-api-subscription = { workspace = true }
 anlg-api-sync = { workspace = true }
 anlg-api-ticket = { workspace = true }
+anlg-api-zoom = { workspace = true }
 anlg-linear = { workspace = true }
 anlg-llm-proxy = { workspace = true }
 anlg-observability = { workspace = true }
