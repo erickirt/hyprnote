@@ -6,6 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EditorView } from "~/store/zustand/tabs/schema";
@@ -158,6 +159,21 @@ vi.mock("~/ai/hooks", () => ({
 
 vi.mock("~/session/enhance-config", () => ({
   shouldShowEmptySummaryConfigError: () => false,
+}));
+
+vi.mock("~/session/components/outer-header/metadata", () => ({
+  MetadataButton: ({
+    renderTrigger,
+  }: {
+    renderTrigger?: (props: { open: boolean; label: string }) => ReactElement;
+  }) =>
+    renderTrigger ? (
+      renderTrigger({ open: false, label: "Open event metadata" })
+    ) : (
+      <button type="button" aria-label="Open event metadata">
+        Metadata
+      </button>
+    ),
 }));
 
 vi.mock("~/session/components/shared", () => ({
@@ -485,7 +501,7 @@ describe("Header", () => {
     ).toBeNull();
   });
 
-  it("shows the session title and folder picker in the toolbar", () => {
+  it("shows the folder picker in the toolbar without a title field", () => {
     render(<Header sessionId="session-1" />);
 
     expect(
@@ -494,36 +510,8 @@ describe("Header", () => {
     expect(
       screen.getByRole("combobox", { name: "Select folder" }),
     ).not.toBeNull();
-    const title = screen.getByRole("textbox", { name: "Session title" });
-    expect((title as HTMLInputElement).value).toBe("Weekly planning");
-    expect(title.className).toContain("border-none");
-  });
-
-  it("shows Untitled for an ad hoc memo with no title", () => {
-    hoisted.sessionTitle = "";
-
-    render(<Header sessionId="session-1" />);
-
-    const title = screen.getByPlaceholderText("Untitled");
-    expect((title as HTMLInputElement).value).toBe("");
-    expect(
-      screen.getByRole("combobox", { name: "Select folder" }),
-    ).not.toBeNull();
-  });
-
-  it("persists edits to the session title", async () => {
-    render(<Header sessionId="session-1" />);
-
-    const title = screen.getByRole("textbox", { name: "Session title" });
-    fireEvent.focus(title);
-    fireEvent.change(title, { target: { value: "Customer follow-up" } });
-    fireEvent.blur(title);
-
-    await waitFor(() => {
-      expect(hoisted.updateSession).toHaveBeenCalledWith({
-        title: "Customer follow-up",
-      });
-    });
+    expect(screen.queryByRole("textbox", { name: "Session title" })).toBeNull();
+    expect(screen.queryByPlaceholderText("Untitled")).toBeNull();
   });
 
   it("can switch from transcript back to memo or summary tabs", () => {
@@ -683,7 +671,7 @@ describe("Header", () => {
     ).toEqual(["Copy", "Resume listening"]);
   });
 
-  it.each(["active", "finalizing", "running_batch"])(
+  it.each(["finalizing", "running_batch"])(
     "hides re-transcription actions while the session is %s",
     (sessionMode) => {
       hoisted.audioExists = false;
@@ -972,7 +960,7 @@ describe("Header", () => {
     expect(hoisted.requestMainListenerControl).not.toHaveBeenCalled();
   });
 
-  it("shows live listening state on the inactive transcript tab without stopping on click", () => {
+  it("hides the transcript tab and shows stop in the view switcher while listening", () => {
     hoisted.sessionMode = "active";
     const handleTabChange = vi.fn();
     const editorTabs: EditorView[] = [
@@ -990,78 +978,68 @@ describe("Header", () => {
       />,
     );
 
-    const transcriptTab = screen.getByRole("button", { name: "Transcript" });
+    expect(screen.queryByRole("button", { name: "Transcript" })).toBeNull();
+    expect(screen.queryByTestId("dancing-sticks")).toBeNull();
+    expect(screen.getByRole("button", { name: "Memos" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Stop" })).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Open event metadata" }),
+    ).not.toBeNull();
 
-    expect(screen.getByTestId("dancing-sticks")).not.toBeNull();
-    expect(transcriptTab.className).toContain("text-muted-foreground/70");
-    expect(transcriptTab.className).toContain("hover:bg-background/60");
-    expect(transcriptTab.className).not.toContain("bg-red-50");
-    expect(transcriptTab.className).not.toContain("dark:bg-red-950/50");
-    expect(transcriptTab.getAttribute("title")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
 
-    fireEvent.click(transcriptTab);
-
-    expect(handleTabChange).toHaveBeenCalledWith({ type: "transcript" });
-    expect(hoisted.stopListening).not.toHaveBeenCalled();
+    expect(handleTabChange).not.toHaveBeenCalled();
+    expect(hoisted.stopListening).toHaveBeenCalledTimes(1);
     expect(hoisted.requestMainListenerControl).not.toHaveBeenCalled();
   });
 
-  it("keeps active live transcript tabs as navigation instead of stop actions", () => {
+  it("keeps memos and stop grouped when transcript is the only extra view", () => {
     hoisted.sessionMode = "active";
-    const handleTabChange = vi.fn();
-    const editorTabs: EditorView[] = [
-      { type: "enhanced", id: "note-1" },
-      { type: "raw" },
-      { type: "transcript" },
-    ];
 
     render(
       <SessionViewSwitcher
         sessionId="session-1"
-        editorTabs={editorTabs}
-        currentTab={{ type: "transcript" }}
-        handleTabChange={handleTabChange}
+        editorTabs={[{ type: "raw" }, { type: "transcript" }]}
+        currentTab={{ type: "raw" }}
+        handleTabChange={vi.fn()}
       />,
     );
 
-    const transcriptTab = screen.getByRole("button", { name: "Transcript" });
+    const viewSwitcher = screen.getByRole("group", {
+      name: "Session note views",
+    });
+    const memos = screen.getByRole("button", { name: "Memos" });
+    const stop = screen.getByRole("button", { name: "Stop" });
 
-    expect(screen.getByTestId("dancing-sticks")).not.toBeNull();
-    expect(transcriptTab.className).toContain("bg-red-50");
-    expect(transcriptTab.className).toContain("@max-[480px]:w-10");
-    expect(transcriptTab.getAttribute("title")).toBeNull();
-    expect(transcriptTab.getAttribute("data-hover-label")).toBeNull();
-
-    fireEvent.click(transcriptTab);
-
-    expect(handleTabChange).toHaveBeenCalledWith({ type: "transcript" });
-    expect(hoisted.stopListening).not.toHaveBeenCalled();
-    expect(hoisted.requestMainListenerControl).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Transcript" })).toBeNull();
+    expect(viewSwitcher.contains(memos)).toBe(true);
+    expect(viewSwitcher.contains(stop)).toBe(true);
+    expect(memos.nextElementSibling).toBe(stop.parentElement);
   });
 
-  it("does not delegate live meeting stop from the transcript tab in standalone windows", () => {
+  it("delegates live meeting stop from the view switcher in standalone windows", () => {
     hoisted.sessionMode = "active";
     hoisted.isMainWebviewWindow = false;
-    const handleTabChange = vi.fn();
-    const editorTabs: EditorView[] = [
-      { type: "enhanced", id: "note-1" },
-      { type: "raw" },
-      { type: "transcript" },
-    ];
 
     render(
       <SessionViewSwitcher
         sessionId="session-1"
-        editorTabs={editorTabs}
-        currentTab={{ type: "transcript" }}
-        handleTabChange={handleTabChange}
+        editorTabs={[
+          { type: "enhanced", id: "note-1" },
+          { type: "raw" },
+          { type: "transcript" },
+        ]}
+        currentTab={{ type: "raw" }}
+        handleTabChange={vi.fn()}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Transcript" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
 
-    expect(handleTabChange).toHaveBeenCalledWith({ type: "transcript" });
-    expect(hoisted.requestMainListenerControl).not.toHaveBeenCalled();
+    expect(hoisted.requestMainListenerControl).toHaveBeenCalledWith(
+      "stop",
+      "session-1",
+    );
     expect(hoisted.stopListening).not.toHaveBeenCalled();
   });
 
@@ -1149,7 +1127,7 @@ describe("Header", () => {
     ]);
   });
 
-  it("includes the transcript tab for active meetings before transcript evidence arrives", () => {
+  it("omits the transcript tab for active meetings before transcript evidence arrives", () => {
     hoisted.hasTranscript = false;
     hoisted.sessionMode = "active";
     hoisted.liveSessionId = "session-1";
@@ -1161,11 +1139,10 @@ describe("Header", () => {
     expect(result.current).toEqual([
       { type: "enhanced", id: "note-1" },
       { type: "raw" },
-      { type: "transcript" },
     ]);
   });
 
-  it("includes the transcript tab for active meetings with live segments", () => {
+  it("omits the transcript tab for active meetings with live segments", () => {
     hoisted.hasTranscript = false;
     hoisted.liveSegments = [{ id: "segment-1" }];
     hoisted.liveSessionId = "session-1";
@@ -1178,8 +1155,32 @@ describe("Header", () => {
     expect(result.current).toEqual([
       { type: "enhanced", id: "note-1" },
       { type: "raw" },
-      { type: "transcript" },
     ]);
+  });
+
+  it("keeps the transcript tab next to stop while transcription is running", () => {
+    hoisted.sessionMode = "running_batch";
+    const handleTabChange = vi.fn();
+
+    render(
+      <SessionViewSwitcher
+        sessionId="session-1"
+        editorTabs={[
+          { type: "enhanced", id: "note-1" },
+          { type: "raw" },
+          { type: "transcript" },
+        ]}
+        currentTab={{ type: "raw" }}
+        handleTabChange={handleTabChange}
+        isTranscribing
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    expect(screen.getByRole("button", { name: "Transcript" })).not.toBeNull();
+    expect(hoisted.stopTranscription).toHaveBeenCalledWith("session-1");
+    expect(handleTabChange).not.toHaveBeenCalled();
   });
 
   it("omits the transcript tab for inactive sessions without transcript or audio", () => {

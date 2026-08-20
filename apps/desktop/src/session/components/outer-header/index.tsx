@@ -11,6 +11,8 @@ import {
 } from "@anlg/ui/components/ui/popover";
 import { cn, safeParseDate } from "@anlg/utils";
 
+import { FolderPicker } from "../folder-picker";
+import { isMeetingStopAction } from "../note-input/header-stop";
 import { TranscriptEditButton } from "../note-input/transcript";
 import { RecordingIcon, useHasTranscript } from "../shared";
 import { MetadataButton } from "./metadata";
@@ -44,18 +46,14 @@ export function OuterHeader({
   sessionId,
   currentView,
   standaloneWindow = false,
-  title,
   viewSwitcher,
-  centerTitle = false,
   transcriptEditMode = false,
   onTranscriptEditModeChange,
 }: {
   sessionId: string;
   currentView: EditorView;
   standaloneWindow?: boolean;
-  title?: React.ReactNode;
   viewSwitcher?: React.ReactNode;
-  centerTitle?: boolean;
   transcriptEditMode?: boolean;
   onTranscriptEditModeChange?: (editMode: boolean) => void;
 }) {
@@ -64,7 +62,8 @@ export function OuterHeader({
   const showWindowControlsGutter = useWindowControlsGutter();
   const showSidebarTimelineHeaderGutter =
     !standaloneWindow && !leftsidebar.expanded;
-  const showExpandedSidebarTimelineHeader = leftsidebar.expanded;
+  const embedStopInViewSwitcher =
+    viewSwitcher != null && isMeetingStopAction(sessionMode);
 
   return (
     <div
@@ -77,40 +76,21 @@ export function OuterHeader({
           (showWindowControlsGutter ? "pl-[156px]" : "pl-[80px]"),
       ])}
     >
-      {title ? (
-        <div
-          data-tauri-drag-region
-          className={cn([
-            "pointer-events-none flex min-w-0 flex-1 items-center",
-            centerTitle && "justify-center",
-            !standaloneWindow &&
-              !showSidebarTimelineHeaderGutter &&
-              !showExpandedSidebarTimelineHeader &&
-              "pl-[114px]",
-          ])}
-        >
-          <div
-            data-tauri-drag-region
-            className="pointer-events-auto max-w-full min-w-0"
-          >
-            {title}
-          </div>
-        </div>
-      ) : (
-        <div data-tauri-drag-region className="min-w-0 flex-1" />
-      )}
+      {viewSwitcher}
+      <div data-tauri-drag-region className="min-h-full min-w-0 flex-1" />
       <div
         data-tauri-drag-region
-        className="relative z-10 ml-auto flex shrink-0 items-center gap-0 pr-1"
+        className="relative z-10 flex shrink-0 items-center pr-1"
       >
-        {viewSwitcher}
         <HeaderMeetingControl
           sessionId={sessionId}
           sessionMode={sessionMode}
           currentView={currentView}
           transcriptEditMode={transcriptEditMode}
           onTranscriptEditModeChange={onTranscriptEditModeChange}
+          hideStop={embedStopInViewSwitcher}
         />
+        <FolderPicker sessionId={sessionId} align="end" />
         <SessionShareButton key={sessionId} sessionId={sessionId} />
         <OverflowButton
           standaloneWindow={standaloneWindow}
@@ -128,12 +108,14 @@ function HeaderMeetingControl({
   currentView,
   transcriptEditMode,
   onTranscriptEditModeChange,
+  hideStop = false,
 }: {
   sessionId: string;
   sessionMode: string;
   currentView: EditorView;
   transcriptEditMode: boolean;
   onTranscriptEditModeChange?: (editMode: boolean) => void;
+  hideStop?: boolean;
 }) {
   const sessionEvent = useSessionEvent(sessionId);
   const hasTranscript = useHasTranscript(sessionId);
@@ -166,6 +148,10 @@ function HeaderMeetingControl({
 
   const isRecording =
     sessionMode === "active" || sessionMode === "running_batch";
+
+  if (hideStop && isRecording) {
+    return null;
+  }
 
   if (!sessionEvent && !isRecording) {
     if (hasTranscript || audioExists) {
@@ -395,9 +381,7 @@ function HeaderMeetingActionPill({
               ])}
             >
               {action.icon}
-              <span className="truncate @max-[480px]:sr-only">
-                {action.label}
-              </span>
+              <span className="truncate">{action.label}</span>
             </button>
             <MetadataButton
               sessionId={sessionId}
