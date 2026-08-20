@@ -40,6 +40,8 @@ describe("toast durations", () => {
   });
 
   it("applies the default duration for each timed toast category", () => {
+    expect(TOAST_DURATIONS.error).toBe(5_000);
+
     sonnerToast.success("Saved");
     sonnerToast.info("Heads up");
     sonnerToast.warning("Check this");
@@ -72,5 +74,24 @@ describe("toast durations", () => {
       id: "warning",
     });
     expect(mocks.loading).toHaveBeenCalledWith("Working", { id: "loading" });
+  });
+
+  it("caps error toasts at five seconds even when callers request longer", () => {
+    sonnerToast.error("Try again", { duration: Infinity, id: "error" });
+    sonnerToast.error("Custom window", { duration: 12_000, id: "custom" });
+    sonnerToast.error("Shorter window", { duration: 2_000, id: "short" });
+
+    expect(mocks.error).toHaveBeenCalledWith("Try again", {
+      duration: TOAST_DURATIONS.error,
+      id: "error",
+    });
+    expect(mocks.error).toHaveBeenCalledWith("Custom window", {
+      duration: TOAST_DURATIONS.error,
+      id: "custom",
+    });
+    expect(mocks.error).toHaveBeenCalledWith("Shorter window", {
+      duration: 2_000,
+      id: "short",
+    });
   });
 });

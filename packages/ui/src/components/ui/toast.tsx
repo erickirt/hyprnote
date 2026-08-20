@@ -9,7 +9,7 @@ export const TOAST_DURATIONS = {
   success: 3_000,
   info: 4_000,
   warning: 6_000,
-  error: 8_000,
+  error: 5_000,
 } as const;
 
 function withDefaultDuration(
@@ -17,6 +17,20 @@ function withDefaultDuration(
   options?: ExternalToast,
 ): ExternalToast {
   return { duration, ...options };
+}
+
+function withAutoDismissDuration(
+  duration: number,
+  options?: ExternalToast,
+): ExternalToast {
+  const requested = options?.duration;
+  return {
+    ...options,
+    duration:
+      requested === undefined || !Number.isFinite(requested)
+        ? duration
+        : Math.min(requested, duration),
+  };
 }
 
 export const sonnerToast: typeof rawSonnerToast = Object.assign(
@@ -54,7 +68,7 @@ export const sonnerToast: typeof rawSonnerToast = Object.assign(
     ) =>
       rawSonnerToast.error(
         message,
-        withDefaultDuration(TOAST_DURATIONS.error, options),
+        withAutoDismissDuration(TOAST_DURATIONS.error, options),
       ),
     message: (
       message: Parameters<typeof rawSonnerToast.message>[0],
@@ -87,7 +101,7 @@ const Toaster = ({
     toastOptions={{
       classNames: {
         toast:
-          "group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border group-[.toaster]:border-border group-[.toaster]:shadow-md group-[.toaster]:rounded-xl group-[.toaster]:overflow-visible group-[.toaster]:w-[300px] group-[.toaster]:p-3.5 group-[.toaster]:gap-3",
+          "group toast pointer-events-auto group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border group-[.toaster]:border-border group-[.toaster]:shadow-md group-[.toaster]:rounded-xl group-[.toaster]:overflow-visible group-[.toaster]:w-[300px] group-[.toaster]:p-3.5 group-[.toaster]:gap-3",
         description: "group-[.toast]:text-muted-foreground",
         actionButton:
           "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
