@@ -8,6 +8,28 @@ use crate::AppWindow;
 pub fn on_window_event(window: &tauri::Window<tauri::Wry>, event: &tauri::WindowEvent) {
     let app = window.app_handle();
 
+    if window.label() == crate::window::floating_bar::WINDOW_LABEL {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = crate::window::floating_bar::hide();
+        }
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            crate::clear_window_state(app, window.label());
+        }
+        return;
+    }
+
+    if window.label() == crate::window::live_caption::WINDOW_LABEL {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = crate::window::live_caption::hide();
+        }
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            crate::clear_window_state(app, window.label());
+        }
+        return;
+    }
+
     if matches!(event, tauri::WindowEvent::Destroyed) {
         crate::clear_window_state(app, window.label());
         return;
@@ -103,6 +125,24 @@ common_event_derives! {
 
 common_event_derives! {
     pub struct FloatingBarOpenMain {}
+}
+
+common_event_derives! {
+    pub struct FloatingBarOverlayState {
+        pub state: crate::window::floating_bar::FloatingBarState,
+    }
+}
+
+common_event_derives! {
+    pub struct FloatingBarOverlayAmplitude {
+        pub amplitude: f64,
+    }
+}
+
+common_event_derives! {
+    pub struct LiveCaptionOverlayState {
+        pub state: crate::window::live_caption::LiveCaptionState,
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone, specta::Type, tauri_specta::Event)]

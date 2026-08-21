@@ -1,4 +1,3 @@
-import { platform } from "@tauri-apps/plugin-os";
 import { useRef } from "react";
 
 import {
@@ -16,7 +15,9 @@ import {
   getCurrentFloatingBarColorScheme,
   getFloatingLiveCaptionToggleVisible,
   getFloatingRouteState,
+  getLiveCaptionRouteState,
   isSameFloatingRouteState,
+  isSameLiveCaptionRouteState,
   type FloatingRouteState,
   type ListenerState,
 } from "./route-state";
@@ -27,8 +28,10 @@ import {
   getSettingsValuesFromNativeChange,
   type FloatingOverlaySettings,
 } from "./settings";
+import { isFloatingBarSupported } from "./support";
 import {
   createFloatingMeetingWindowSynchronizer,
+  createLiveCaptionWindowSynchronizer,
   hideFloatingMeetingPanel,
   hideLiveCaptionPanel,
   showFloatingMeetingWindow,
@@ -59,7 +62,7 @@ export function FloatingMeetingWindowHost() {
   const floatingBarEnabled = useConfigValue("floating_bar_enabled");
   const storedSettings = useConfigValues(FLOATING_OVERLAY_SETTING_KEYS);
   const overlaySettings = getFloatingOverlaySettings(storedSettings);
-  const floatingOverlaySupported = platform() === "macos";
+  const floatingOverlaySupported = isFloatingBarSupported();
 
   return (
     <>
@@ -74,7 +77,11 @@ export function FloatingMeetingWindowHost() {
       ) : (
         <FloatingMeetingWindowDisabled />
       )}
-      <LiveCaptionWindowDisabled />
+      {floatingOverlaySupported ? (
+        <LiveCaptionWindowSync settings={overlaySettings} />
+      ) : (
+        <LiveCaptionWindowDisabled />
+      )}
     </>
   );
 }
@@ -162,6 +169,63 @@ function LiveCaptionWindowDisabled() {
   });
 
   return null;
+}
+
+function LiveCaptionWindowSync({
+  settings,
+}: {
+  settings: FloatingOverlaySettings;
+}) {
+  const settingsRef = useLatestRef(settings);
+  const refreshSettingsRef = useRef<() => void>(() => {});
+
+  useMountEffect(() => {
+    let routeState = getLiveCaptionRouteState(
+      listenerStore.getState(),
+      settingsRef.current,
+    );
+    const windowSynchronizer = createLiveCaptionWindowSynchronizer();
+
+    const updateRouteState = (
+      nextRouteState: ReturnType<typeof getLiveCaptionRouteState>,
+    ) => {
+      if (isSameLiveCaptionRouteState(nextRouteState, routeState)) {
+        return;
+      }
+
+      routeState = nextRouteState;
+      windowSynchronizer.update(routeState);
+    };
+    const refreshCurrentRouteState = () => {
+      updateRouteState(
+        getLiveCaptionRouteState(listenerStore.getState(), settingsRef.current),
+      );
+    };
+    refreshSettingsRef.current = refreshCurrentRouteState;
+
+    windowSynchronizer.update(routeState);
+
+    const unsubscribe = listenerStore.subscribe((state, previousState) => {
+      if (!haveLiveCaptionRouteInputsChanged(state, previousState)) {
+        return;
+      }
+
+      refreshCurrentRouteState();
+    });
+
+    return () => {
+      refreshSettingsRef.current = () => {};
+      unsubscribe();
+      void windowSynchronizer.dispose();
+    };
+  });
+
+  return (
+    <FloatingMeetingWindowSettingsSync
+      key={JSON.stringify(settings)}
+      onSettingsChange={() => refreshSettingsRef.current()}
+    />
+  );
 }
 
 function FloatingMeetingWindowSync({
@@ -324,6 +388,19 @@ function getCurrentFloatingRouteState(
     speakerLabelContext: getFloatingSpeakerLabelContext(state, meetingData),
     transcriptBubbles,
   });
+}
+
+function haveLiveCaptionRouteInputsChanged(
+  state: ListenerState,
+  previousState: ListenerState,
+) {
+  return (
+    state.live.status !== previousState.live.status ||
+    state.live.sessionId !== previousState.live.sessionId ||
+    state.live.liveTranscriptionActive !==
+      previousState.live.liveTranscriptionActive ||
+    state.liveCaptionText !== previousState.liveCaptionText
+  );
 }
 
 function haveFloatingRouteInputsChanged(

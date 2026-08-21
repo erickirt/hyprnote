@@ -7,6 +7,8 @@ export type WindowLabel =
   | "main"
   | "composer"
   | "floating"
+  | "floating-bar"
+  | "live-caption"
   | `note-${string}`
   | "calendar"
   | "settings";

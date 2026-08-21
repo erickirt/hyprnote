@@ -20,9 +20,11 @@ permissions = [
     "allow-floating-bar-hide",
     "allow-floating-bar-update",
     "allow-floating-bar-update-amplitude",
+    "allow-floating-bar-current-state",
     "allow-live-caption-show",
     "allow-live-caption-hide",
     "allow-live-caption-update",
+    "allow-live-caption-current-state",
     "allow-devtools-panel-show",
     "allow-devtools-panel-hide",
 ]
