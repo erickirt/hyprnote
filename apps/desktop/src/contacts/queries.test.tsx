@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   ),
   trackAnalyticsEvent: vi.fn(),
   rows: [] as Array<Record<string, unknown>>,
+  loading: false,
 }));
 
 vi.mock("~/analytics", () => ({
@@ -19,8 +20,16 @@ vi.mock("~/db", () => ({
   executeTransaction: mocks.executeTransaction,
   liveQueryClient: { execute: mocks.execute },
   useLiveQuery: (options: {
-    mapRows: (rows: Array<Record<string, unknown>>) => unknown;
-  }) => ({ data: options.mapRows(mocks.rows) }),
+    enabled?: boolean;
+    mapRows?: (rows: Array<Record<string, unknown>>) => unknown;
+  }) => ({
+    data:
+      options.enabled === false || mocks.loading
+        ? undefined
+        : options.mapRows
+          ? options.mapRows(mocks.rows)
+          : mocks.rows,
+  }),
 }));
 
 vi.mock("~/shared/utils", () => ({
@@ -44,8 +53,10 @@ import {
   updateHumanContactSummary,
   updateHuman,
   updateOrganization,
+  useHumanDisplayRecordsByIds,
   useHumans,
   useHumanSessions,
+  useOrganizationDisplayRecordsByIds,
   useOrganizations,
 } from "./queries";
 
@@ -53,6 +64,7 @@ describe("contact SQLite queries", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.rows = [];
+    mocks.loading = false;
     mocks.execute.mockResolvedValue([]);
   });
 
@@ -190,6 +202,129 @@ describe("contact SQLite queries", () => {
         avatarDataUrl: null,
       },
     ]);
+  });
+
+  it("loads only lightweight display fields for referenced contacts", () => {
+    mocks.rows = [
+      {
+        id: "human-1",
+        organization_id: "organization-1",
+        name: "Alice",
+        email: "alice@example.com",
+        avatar_data_url: "data:image/jpeg;base64,unused",
+      },
+    ];
+
+    const { result: humanResult } = renderHook(() =>
+      useHumanDisplayRecordsByIds(["human-1", "human-1", ""]),
+    );
+
+    expect(humanResult.current).toEqual([
+      {
+        id: "human-1",
+        organizationId: "organization-1",
+        name: "Alice",
+        email: "alice@example.com",
+      },
+    ]);
+
+    mocks.rows = [{ id: "organization-1", name: "Acme" }];
+    const { result: organizationResult } = renderHook(() =>
+      useOrganizationDisplayRecordsByIds(["organization-1"]),
+    );
+
+    expect(organizationResult.current).toEqual([
+      { id: "organization-1", name: "Acme" },
+    ]);
+  });
+
+  it("does not expose display records when no ids are referenced", () => {
+    mocks.rows = [{ id: "human-1", name: "Alice" }];
+
+    const { result: humanResult } = renderHook(() =>
+      useHumanDisplayRecordsByIds([]),
+    );
+    const { result: organizationResult } = renderHook(() =>
+      useOrganizationDisplayRecordsByIds([]),
+    );
+
+    expect(humanResult.current).toEqual([]);
+    expect(organizationResult.current).toEqual([]);
+  });
+
+  it("keeps the last resolved display records while a by-id query is loading", () => {
+    mocks.rows = [
+      {
+        id: "human-1",
+        organization_id: "organization-1",
+        name: "Alice",
+        email: "alice@example.com",
+      },
+    ];
+
+    const { result: humanResult, rerender: rerenderHumans } = renderHook(
+      ({ ids }) => useHumanDisplayRecordsByIds(ids),
+      { initialProps: { ids: ["human-1"] } },
+    );
+
+    expect(humanResult.current).toEqual([
+      {
+        id: "human-1",
+        organizationId: "organization-1",
+        name: "Alice",
+        email: "alice@example.com",
+      },
+    ]);
+
+    mocks.loading = true;
+    rerenderHumans({ ids: ["human-1", "human-2"] });
+    expect(humanResult.current).toEqual([
+      {
+        id: "human-1",
+        organizationId: "organization-1",
+        name: "Alice",
+        email: "alice@example.com",
+      },
+    ]);
+
+    mocks.loading = false;
+    mocks.rows = [{ id: "organization-1", name: "Acme" }];
+    const { result: organizationResult, rerender: rerenderOrgs } = renderHook(
+      ({ ids }) => useOrganizationDisplayRecordsByIds(ids),
+      { initialProps: { ids: ["organization-1"] } },
+    );
+
+    expect(organizationResult.current).toEqual([
+      { id: "organization-1", name: "Acme" },
+    ]);
+
+    mocks.loading = true;
+    rerenderOrgs({ ids: ["organization-1", "organization-2"] });
+    expect(organizationResult.current).toEqual([
+      { id: "organization-1", name: "Acme" },
+    ]);
+  });
+
+  it("drops held display records when no ids are referenced", () => {
+    mocks.rows = [
+      {
+        id: "human-1",
+        organization_id: "organization-1",
+        name: "Alice",
+        email: "alice@example.com",
+      },
+    ];
+
+    const { result, rerender } = renderHook(
+      ({ ids }) => useHumanDisplayRecordsByIds(ids),
+      { initialProps: { ids: ["human-1"] } },
+    );
+
+    expect(result.current).toHaveLength(1);
+
+    mocks.loading = true;
+    rerender({ ids: [] });
+    expect(result.current).toEqual([]);
   });
 
   it("loads deduplicated human records directly from SQLite", async () => {

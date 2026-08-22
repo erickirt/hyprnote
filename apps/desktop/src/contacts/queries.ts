@@ -1,3 +1,5 @@
+import { useRef } from "react";
+
 import { trackAnalyticsEvent } from "~/analytics";
 import { executeTransaction, liveQueryClient, useLiveQuery } from "~/db";
 import { enqueueDatabaseWrite } from "~/db/write-queue";
@@ -44,6 +46,20 @@ export type HumanRecord = {
   summary: ContactSummaryRecord | null;
 };
 
+type HumanDisplaySqlRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  email: string;
+};
+
+export type HumanDisplayRecord = {
+  id: string;
+  organizationId: string;
+  name: string;
+  email: string;
+};
+
 type OrganizationSqlRow = {
   id: string;
   owner_user_id: string;
@@ -64,6 +80,16 @@ export type OrganizationRecord = {
   pinned: boolean;
   pinOrder: number | null;
   avatarDataUrl: string | null;
+};
+
+type OrganizationDisplaySqlRow = {
+  id: string;
+  name: string;
+};
+
+export type OrganizationDisplayRecord = {
+  id: string;
+  name: string;
 };
 
 const AVATAR_SQL = `CASE
@@ -112,6 +138,8 @@ export type ContactSearchRecord = {
 
 const EMPTY_HUMANS: HumanRecord[] = [];
 const EMPTY_ORGANIZATIONS: OrganizationRecord[] = [];
+const EMPTY_HUMAN_DISPLAY_RECORDS: HumanDisplayRecord[] = [];
+const EMPTY_ORGANIZATION_DISPLAY_RECORDS: OrganizationDisplayRecord[] = [];
 const EMPTY_HUMAN_SESSIONS: HumanSessionRecord[] = [];
 
 export function useHumans(): HumanRecord[] {
@@ -156,6 +184,60 @@ export function useOrganizations(): OrganizationRecord[] {
     mapRows: (rows) => rows.map(mapOrganizationRow),
   });
   return data;
+}
+
+export function useHumanDisplayRecordsByIds(
+  humanIds: readonly string[],
+): HumanDisplayRecord[] {
+  const uniqueIds = [...new Set(humanIds.filter(Boolean))].sort();
+  const placeholders = uniqueIds.map(() => "?").join(", ");
+  const enabled = uniqueIds.length > 0;
+  const { data } = useLiveQuery<HumanDisplaySqlRow, HumanDisplayRecord[]>({
+    sql: `
+      SELECT id, organization_id, name, email
+      FROM humans
+      WHERE id IN (${placeholders || "NULL"})
+        AND deleted_at IS NULL
+      ORDER BY id
+    `,
+    params: uniqueIds,
+    enabled,
+    mapRows: (rows) =>
+      rows.map((row) => ({
+        id: row.id,
+        organizationId: row.organization_id,
+        name: row.name,
+        email: row.email,
+      })),
+  });
+  return useHeldLiveQueryRows(data, EMPTY_HUMAN_DISPLAY_RECORDS, enabled);
+}
+
+export function useOrganizationDisplayRecordsByIds(
+  organizationIds: readonly string[],
+): OrganizationDisplayRecord[] {
+  const uniqueIds = [...new Set(organizationIds.filter(Boolean))].sort();
+  const placeholders = uniqueIds.map(() => "?").join(", ");
+  const enabled = uniqueIds.length > 0;
+  const { data } = useLiveQuery<
+    OrganizationDisplaySqlRow,
+    OrganizationDisplayRecord[]
+  >({
+    sql: `
+      SELECT id, name
+      FROM organizations
+      WHERE id IN (${placeholders || "NULL"})
+        AND deleted_at IS NULL
+      ORDER BY id
+    `,
+    params: uniqueIds,
+    enabled,
+  });
+  return useHeldLiveQueryRows(
+    data,
+    EMPTY_ORGANIZATION_DISPLAY_RECORDS,
+    enabled,
+  );
 }
 
 export async function loadHuman(humanId: string): Promise<HumanRecord | null> {
@@ -776,6 +858,22 @@ export function applyContactEnhancement({
 
     if (statements.length > 0) await executeTransaction(statements);
   });
+}
+
+function useHeldLiveQueryRows<T>(
+  data: T[] | undefined,
+  empty: T[],
+  enabled: boolean,
+): T[] {
+  const previous = useRef(empty);
+  if (data !== undefined) {
+    previous.current = data;
+  }
+  if (!enabled) {
+    previous.current = empty;
+    return empty;
+  }
+  return data ?? previous.current;
 }
 
 function mapHumanRow(row: HumanSqlRow): HumanRecord {
