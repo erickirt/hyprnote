@@ -59,6 +59,12 @@ pub fn show_devtool<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
 
 #[tauri::command]
 #[specta::specta]
+pub fn is_app_store_build() -> bool {
+    cfg!(feature = "app-store")
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn complete_app_exit<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     crate::mark_exit_flush_complete();
     app.exit(0);
@@ -141,12 +147,20 @@ pub async fn install_embedded_cli<R: tauri::Runtime>(
 #[tauri::command]
 #[specta::specta]
 pub async fn list_skill_agents() -> Result<Vec<SkillAgentStatus>, String> {
+    if cfg!(feature = "app-store") {
+        return Ok(Vec::new());
+    }
+
     crate::agent_skills::list()
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn install_agent_skill(agent: SkillAgent) -> Result<SkillAgentStatus, String> {
+    if cfg!(feature = "app-store") {
+        return Err("Agent skill installation is unavailable in the Mac App Store build.".into());
+    }
+
     crate::agent_skills::install(agent)
 }
 
