@@ -12,7 +12,6 @@ const SYNC_TIMEOUT: Duration = Duration::from_secs(90);
 const SYNC_ATTEMPTS: usize = 3;
 const POLICY_SYNC_TIMEOUT: Duration = Duration::from_secs(30);
 const REPLICA_VISIBILITY_TIMEOUT: Duration = Duration::from_secs(90);
-const REPLICA_VISIBILITY_ATTEMPTS: usize = 3;
 const REPLICA_VISIBILITY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 fn cloudsync_config(auth: CloudsyncAuth, wait_ms: i64, max_retries: i64) -> CloudsyncRuntimeConfig {
@@ -65,13 +64,13 @@ async fn setup_db_with_network_options(
     claim_cloudsync_workspace(db.pool(), workspace_id)
         .await
         .unwrap();
-    db.cloudsync_configure(cloudsync_config(auth, wait_ms, max_retries))
-        .await
-        .unwrap();
-    tokio::time::timeout(Duration::from_secs(15), db.cloudsync_start())
-        .await
-        .expect("cloudsync start timed out")
-        .unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(15),
+        db.cloudsync_prepare_manual_transport(cloudsync_config(auth, wait_ms, max_retries)),
+    )
+    .await
+    .expect("cloudsync transport initialization timed out")
+    .unwrap();
     db
 }
 
@@ -147,7 +146,7 @@ async fn assert_pending_change(db: &Db, operation: &str) {
 async fn wait_for_unsent_changes(db: &Db, expected: bool, operation: &str) {
     tokio::time::timeout(REPLICA_VISIBILITY_TIMEOUT, async {
         loop {
-            if db.cloudsync_status().await.unwrap().has_unsent_changes == Some(expected) {
+            if db.cloudsync_network_has_unsent_changes().await.unwrap() == expected {
                 break;
             }
 
@@ -269,28 +268,26 @@ async fn wait_for_e2ee_record(
     expected_payload: &str,
     operation: &str,
 ) -> Option<(String, String)> {
-    let mut latest_record = None;
-    for attempt in 1..=REPLICA_VISIBILITY_ATTEMPTS {
-        sync_full_snapshot(db, operation).await;
-        let record: Option<(String, String)> =
-            sqlx::query_as("SELECT workspace_id, payload FROM e2ee_records WHERE id = ?")
-                .bind(record_id)
-                .fetch_optional(db.pool())
-                .await
-                .unwrap();
-        if record.as_ref().is_some_and(|(workspace_id, payload)| {
-            workspace_id == expected_workspace_id && payload == expected_payload
-        }) {
-            return record;
-        }
-        latest_record = record;
+    tokio::time::timeout(REPLICA_VISIBILITY_TIMEOUT, async {
+        loop {
+            sync_full_snapshot(db, operation).await;
+            let record: Option<(String, String)> =
+                sqlx::query_as("SELECT workspace_id, payload FROM e2ee_records WHERE id = ?")
+                    .bind(record_id)
+                    .fetch_optional(db.pool())
+                    .await
+                    .unwrap();
+            if record.as_ref().is_some_and(|(workspace_id, payload)| {
+                workspace_id == expected_workspace_id && payload == expected_payload
+            }) {
+                return record;
+            }
 
-        if attempt < REPLICA_VISIBILITY_ATTEMPTS {
             tokio::time::sleep(REPLICA_VISIBILITY_POLL_INTERVAL).await;
         }
-    }
-
-    latest_record
+    })
+    .await
+    .unwrap_or(None)
 }
 
 async fn setup_stale_record_client(
@@ -544,27 +541,28 @@ async fn personal_workspace_tokens_block_foreign_encrypted_writes() {
     sync_ok(&owner, "workspace B encrypted note update").await;
 
     let owner_round_trip = setup_db(&token_b, &workspace_b).await;
-    let mut round_trip_title: Option<String> = None;
-    for attempt in 1..=REPLICA_VISIBILITY_ATTEMPTS {
-        sync_full_snapshot(&owner_round_trip, "workspace B update round trip").await;
-        apply_e2ee_replica_changes(owner_round_trip.pool(), &keys_b)
-            .await
-            .unwrap();
-        round_trip_title =
-            sqlx::query_scalar("SELECT title FROM sessions WHERE id = ? AND workspace_id = ?")
-                .bind(&note.session_id)
-                .bind(&workspace_b)
-                .fetch_optional(owner_round_trip.pool())
+    let round_trip_title = tokio::time::timeout(REPLICA_VISIBILITY_TIMEOUT, async {
+        loop {
+            sync_full_snapshot(&owner_round_trip, "workspace B update round trip").await;
+            apply_e2ee_replica_changes(owner_round_trip.pool(), &keys_b)
                 .await
                 .unwrap();
-        if round_trip_title.as_deref() == Some(updated_title.as_str()) {
-            break;
-        }
+            let round_trip_title: Option<String> =
+                sqlx::query_scalar("SELECT title FROM sessions WHERE id = ? AND workspace_id = ?")
+                    .bind(&note.session_id)
+                    .bind(&workspace_b)
+                    .fetch_optional(owner_round_trip.pool())
+                    .await
+                    .unwrap();
+            if round_trip_title.as_deref() == Some(updated_title.as_str()) {
+                return round_trip_title;
+            }
 
-        if attempt < REPLICA_VISIBILITY_ATTEMPTS {
             tokio::time::sleep(REPLICA_VISIBILITY_POLL_INTERVAL).await;
         }
-    }
+    })
+    .await
+    .unwrap_or(None);
     stop_db(&owner_round_trip, "workspace B update round-trip client").await;
 
     let insert_attacker = setup_policy_db(&token_a, &workspace_a).await;
