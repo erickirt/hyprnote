@@ -63,6 +63,10 @@ jobs:
             echo "::error::Dry-run workflow ID must be a positive integer"
             exit 1
           fi
+          if [[ "$INPUT_INCLUDE_WINDOWS" != "true" ]]; then
+            echo "::error::Stable releases must include Windows for automatic Microsoft Store submission"
+            exit 1
+          fi
 
           VERSION="$INPUT_VERSION"
           CANDIDATE_SHA="${INPUT_CANDIDATE_SHA,,}"
@@ -559,6 +563,20 @@ jobs:
             echo "- SHA-256: \`$package_sha256\`"
             echo "- Silent install argument: \`/S\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  store-publish:
+    needs: [parse, gh-release]
+    if: ${{ !cancelled() && needs.parse.result == 'success' && needs.gh-release.result == 'success' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/desktop_store_publish.yaml
+    with:
+      version: ${{ needs.parse.outputs.version }}
+      candidate_sha: ${{ needs.parse.outputs.candidate_sha }}
+      include_macos: true
+      include_windows: true
+      submit_to_stores: true
+    secrets: inherit
 
   linux-package-bump:
     needs: [parse, gh-release]

@@ -1,6 +1,28 @@
 name: Desktop Store Publish
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Stable desktop version to release (e.g., 1.4.12)"
+        required: true
+        type: string
+      candidate_sha:
+        description: "Exact 40-character commit tagged for the stable release"
+        required: true
+        type: string
+      include_macos:
+        description: "Build the signed Mac App Store package"
+        type: boolean
+        default: true
+      include_windows:
+        description: "Prepare the Microsoft Store package update"
+        type: boolean
+        default: true
+      submit_to_stores:
+        description: "Upload to App Store Connect and submit the Microsoft Store update"
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       version:

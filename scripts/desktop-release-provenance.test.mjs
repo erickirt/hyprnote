@@ -268,6 +268,38 @@ test("repository release workflows match the authored release plan", async () =>
   verifyWorkflowPlatformCoverage({ publishWorkflow, cdWorkflow });
 });
 
+test("stable desktop releases submit both store packages", async () => {
+  const [publishWorkflow, storeWorkflow] = await Promise.all([
+    readFile(".github/workflows/desktop_publish.yaml", "utf8"),
+    readFile(".github/workflows/desktop_store_publish.yaml", "utf8"),
+  ]);
+
+  assert.match(storeWorkflow, /\n  workflow_call:\n/);
+  assert.match(
+    publishWorkflow,
+    /Stable releases must include Windows for automatic Microsoft Store submission/,
+  );
+
+  const jobStart = publishWorkflow.indexOf("\n  store-publish:\n");
+  assert.notEqual(jobStart, -1, "missing store-publish job");
+  const remainingWorkflow = publishWorkflow.slice(jobStart + 1);
+  const nextJob = remainingWorkflow.slice(1).search(/\n  [a-z][a-z0-9-]*:\n/);
+  const storePublishJob =
+    nextJob === -1
+      ? remainingWorkflow
+      : remainingWorkflow.slice(0, nextJob + 1);
+
+  assert.match(storePublishJob, /needs: \[parse, gh-release\]/);
+  assert.match(
+    storePublishJob,
+    /uses: \.\/\.github\/workflows\/desktop_store_publish\.yaml/,
+  );
+  assert.match(storePublishJob, /include_macos: true/);
+  assert.match(storePublishJob, /include_windows: true/);
+  assert.match(storePublishJob, /submit_to_stores: true/);
+  assert.match(storePublishJob, /secrets: inherit/);
+});
+
 test("binds every release asset to a candidate run and detects replacement", async () => {
   const directory = await mkdtemp(
     path.join(os.tmpdir(), "anarlog-release-provenance-"),
