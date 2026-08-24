@@ -347,9 +347,9 @@ mod tests {
             .await;
 
         Mock::given(method("GET"))
-            .and(path_regex("/proxy/.*userinfo.*"))
+            .and(path("/proxy/calendar/v3/calendars/primary"))
             .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({"email": "user@example.com", "name": "Test User"}),
+                serde_json::json!({"id": "user@example.com", "summary": "Test User"}),
             ))
             .mount(&nango_mock)
             .await;
