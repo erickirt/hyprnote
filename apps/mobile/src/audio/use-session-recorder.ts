@@ -8,6 +8,10 @@ import {
 import { useCallback, useRef, useState } from "react";
 import { AppState } from "react-native";
 
+import {
+  beginMobileCapture,
+  endMobileCapture,
+} from "@/audio/capture-lifecycle";
 import { pcmAmplitude } from "@/audio/pcm-wav";
 import { type RecorderPhase } from "@/audio/recorder-status";
 import { SessionWavWriter } from "@/audio/session-wav-writer";
@@ -46,6 +50,7 @@ export function useSessionRecorder(
   durationMs: number;
   liveStatus: LiveTranscriptionStatus;
   liveTranscript: string;
+  start: () => Promise<void>;
   stop: () => Promise<StopResult>;
   retry: () => Promise<StopResult>;
 } {
@@ -66,6 +71,19 @@ export function useSessionRecorder(
   const completionTrackedRef = useRef(false);
   const reportedFailureRef = useRef<string | null>(null);
   const durationRef = useRef(0);
+  const captureRegisteredRef = useRef(false);
+
+  const registerCapture = useCallback(() => {
+    if (captureRegisteredRef.current) return;
+    captureRegisteredRef.current = true;
+    beginMobileCapture(sessionId);
+  }, [sessionId]);
+
+  const unregisterCapture = useCallback(() => {
+    if (!captureRegisteredRef.current) return;
+    captureRegisteredRef.current = false;
+    endMobileCapture(sessionId);
+  }, [sessionId]);
 
   const setPhase = useCallback((next: RecorderPhase) => {
     phaseRef.current = next;
@@ -148,7 +166,7 @@ export function useSessionRecorder(
   const streamRef = useRef(stream);
   streamRef.current = stream;
 
-  const start = useCallback(async () => {
+  const performStart = useCallback(async () => {
     const generation = ++startGenerationRef.current;
     const isCurrent = () =>
       activeRef.current && generation === startGenerationRef.current;
@@ -198,6 +216,7 @@ export function useSessionRecorder(
       });
       if (!isCurrent()) return;
       writerRef.current = new SessionWavWriter(sessionId);
+      registerCapture();
       await stream.start();
       if (!isCurrent()) {
         phaseRef.current = "recording";
@@ -217,7 +236,7 @@ export function useSessionRecorder(
         stream.stop();
       } catch {}
       try {
-        writerRef.current?.close();
+        writerRef.current?.closeAndDiscardEmpty();
       } catch (cleanupError) {
         captureOperationalError(cleanupError, {
           operation: "recording_start_cleanup",
@@ -226,18 +245,45 @@ export function useSessionRecorder(
       writerRef.current = null;
       void liveRef.current?.stop();
       liveRef.current = null;
+      unregisterCapture();
       reportFailure("start_failed", error, "recording_start");
       captureAnalytics("session_start_failed", {
         failure_stage: "capture_start",
       });
       setPhase("error");
     }
-  }, [reportFailure, sessionId, setPhase, stream]);
+  }, [
+    registerCapture,
+    reportFailure,
+    sessionId,
+    setPhase,
+    stream,
+    unregisterCapture,
+  ]);
+
+  const start = useCallback((): Promise<void> => {
+    const currentOperation = startRef.current;
+    if (currentOperation) return currentOperation;
+    if (
+      !["idle", "unavailable", "interrupted", "error"].includes(
+        phaseRef.current,
+      )
+    ) {
+      return Promise.resolve();
+    }
+    const operation = performStart();
+    startRef.current = operation;
+    const clearOperation = () => {
+      if (startRef.current === operation) startRef.current = null;
+    };
+    void operation.then(clearOperation, clearOperation);
+    return operation;
+  }, [performStart]);
 
   useMountEffect(() => {
     activeRef.current = true;
     if (!enabled) return;
-    startRef.current = start();
+    void start();
   });
 
   useMountEffect(() => {
@@ -248,7 +294,7 @@ export function useSessionRecorder(
         nextState === "active" &&
         phaseRef.current === "unavailable";
       previousState = nextState;
-      if (returnedFromSettings) startRef.current = start();
+      if (returnedFromSettings) void start();
     });
     return () => subscription.remove();
   });
@@ -301,6 +347,7 @@ export function useSessionRecorder(
       }
       writerRef.current = null;
       liveRef.current = null;
+      unregisterCapture();
       setFailure(null);
       setPhase("saved");
       return "saved";
@@ -333,8 +380,7 @@ export function useSessionRecorder(
       return stop();
     }
     if (["unavailable", "interrupted", "error"].includes(phaseRef.current)) {
-      startRef.current = start();
-      await startRef.current;
+      await start();
     }
     return "noop";
   };
@@ -344,7 +390,7 @@ export function useSessionRecorder(
   useMountEffect(() => () => {
     activeRef.current = false;
     startGenerationRef.current += 1;
-    void stopRef.current();
+    void stopRef.current().then(unregisterCapture, unregisterCapture);
   });
 
   return {
@@ -354,6 +400,7 @@ export function useSessionRecorder(
     durationMs,
     liveStatus,
     liveTranscript,
+    start,
     stop,
     retry,
   };
