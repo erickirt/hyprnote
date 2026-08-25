@@ -275,7 +275,7 @@ jobs:
             echo "::error::Could not read the imported Mac App Distribution certificate fingerprint"
             exit 1
           fi
-          application_cert_sha1="${application_cert_sha1^^}"
+          application_cert_sha1=$(printf '%s' "$application_cert_sha1" | tr '[:lower:]' '[:upper:]')
 
           profile_app_prefix="${profile_app_id%.com.hyprnote.desktop}"
           if [[ -z "$profile_app_prefix" || "$profile_app_prefix" == "$profile_app_id" ]]; then

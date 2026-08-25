@@ -366,6 +366,7 @@ test("Mac App Store builds include a compiled app icon catalog", async () => {
     storeWorkflow,
     /APPLICATION_CERT_SHA1:.*application-cert-sha1/,
   );
+  assert.doesNotMatch(storeWorkflow, /application_cert_sha1\^\^/);
   assert.match(
     storeWorkflow,
     /\.bundle\.macOS\.files\["Resources\/Assets\.car"\]/,
