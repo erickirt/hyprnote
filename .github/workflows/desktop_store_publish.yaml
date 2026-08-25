@@ -424,12 +424,21 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - if: ${{ inputs.submit_to_stores }}
-        name: Validate and upload to App Store Connect
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: workflow-source
+          persist-credentials: false
+          sparse-checkout: scripts/app-store-connect-submit.mjs
+          sparse-checkout-cone-mode: false
+      - if: ${{ inputs.submit_to_stores }}
+        name: Upload and submit to App Review
         env:
           APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
           APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
           PKG_PATH: ${{ steps.package.outputs.path }}
+          VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -euo pipefail
 
@@ -457,18 +466,13 @@ jobs:
           fi
           chmod 600 "$key_path"
 
-          xcrun altool \
-            --validate-app \
-            --type macos \
-            --file "$PKG_PATH" \
-            --apiKey "$APPSTORE_API_KEY_ID" \
-            --apiIssuer "$APPSTORE_ISSUER_ID"
-          xcrun altool \
-            --upload-app \
-            --type macos \
-            --file "$PKG_PATH" \
-            --apiKey "$APPSTORE_API_KEY_ID" \
-            --apiIssuer "$APPSTORE_ISSUER_ID"
+          node workflow-source/scripts/app-store-connect-submit.mjs \
+            --bundle-id com.hyprnote.desktop \
+            --issuer-id "$APPSTORE_ISSUER_ID" \
+            --key-id "$APPSTORE_API_KEY_ID" \
+            --package "$PKG_PATH" \
+            --private-key "$key_path" \
+            --version "$VERSION"
       - name: Summarize Mac App Store release
         env:
           SUBMITTED: ${{ inputs.submit_to_stores }}
@@ -478,7 +482,7 @@ jobs:
             echo "## Mac App Store"
             echo "- Version: \`$VERSION\`"
             echo "- Architecture: Apple Silicon"
-            echo "- Uploaded to App Store Connect: \`$SUBMITTED\`"
+            echo "- Submitted to App Review: \`$SUBMITTED\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   microsoft-store:

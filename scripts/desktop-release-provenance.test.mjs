@@ -298,6 +298,11 @@ test("stable desktop releases submit both store packages", async () => {
   assert.match(storePublishJob, /include_windows: true/);
   assert.match(storePublishJob, /submit_to_stores: true/);
   assert.doesNotMatch(storePublishJob, /secrets: inherit/);
+  assert.match(
+    storeWorkflow,
+    /node workflow-source\/scripts\/app-store-connect-submit\.mjs/,
+  );
+  assert.match(storeWorkflow, /Submitted to App Review/);
 
   const expectedSecrets = [
     "APPLE_TEAM_ID",
