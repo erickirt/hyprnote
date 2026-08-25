@@ -13,7 +13,10 @@
     "externalBin": [],
     "targets": ["app"],
     "macOS": {
-      "entitlements": "./Entitlements.app-store.plist"
+      "entitlements": "./Entitlements.app-store.plist",
+      "files": {
+        "Resources/Assets.car": "./resources/app-store/Assets.car"
+      }
     }
   },
   "plugins": {

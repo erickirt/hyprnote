@@ -317,6 +317,34 @@ jobs:
             "$cloudsync_dylib"
           codesign --verify --strict --verbose=2 "$cloudsync_dylib"
         working-directory: ./apps/desktop
+      - name: Compile Mac App Store asset catalog
+        run: |
+          set -euo pipefail
+
+          asset_output="$RUNNER_TEMP/mac-app-store-assets"
+          asset_source="$RUNNER_TEMP/AppIcon.icon"
+          asset_catalog="apps/desktop/src-tauri/resources/app-store/Assets.car"
+          mkdir -p "$asset_output" "$(dirname "$asset_catalog")"
+          cp -R apps/desktop/src-tauri/icons/src/stable.icon "$asset_source"
+          xcrun actool \
+            "$asset_source" \
+            --compile "$asset_output" \
+            --output-format human-readable-text \
+            --notices \
+            --warnings \
+            --errors \
+            --output-partial-info-plist "$asset_output/assetcatalog_generated_info.plist" \
+            --app-icon AppIcon \
+            --include-all-app-icons \
+            --enable-on-demand-resources NO \
+            --target-device mac \
+            --minimum-deployment-target 10.13 \
+            --platform macosx
+          if [[ ! -s "$asset_output/Assets.car" ]]; then
+            echo "::error::actool did not produce the Mac App Store asset catalog"
+            exit 1
+          fi
+          cp "$asset_output/Assets.car" "$asset_catalog"
       - name: Build signed Mac App Store application
         env:
           APPLE_SIGNING_IDENTITY: ${{ steps.apple-store-cert.outputs.application-cert-id }}
@@ -374,6 +402,17 @@ jobs:
           fi
           if [[ ! -f "$app/Contents/embedded.provisionprofile" ]]; then
             echo "::error::Mac App Store application is missing its embedded provisioning profile"
+            exit 1
+          fi
+          if [[ ! -s "$app/Contents/Resources/Assets.car" ]]; then
+            echo "::error::Mac App Store application is missing its compiled asset catalog"
+            exit 1
+          fi
+          app_icon_name=$(
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$app/Contents/Info.plist"
+          )
+          if [[ "$app_icon_name" != "AppIcon" ]]; then
+            echo "::error::Mac App Store application has icon catalog name $app_icon_name"
             exit 1
           fi
 

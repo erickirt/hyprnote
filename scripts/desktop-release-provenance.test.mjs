@@ -342,6 +342,32 @@ test("stable desktop releases submit both store packages", async () => {
   assert.deepEqual(forwardedSecrets, expectedSecrets);
 });
 
+test("Mac App Store builds include a compiled app icon catalog", async () => {
+  const [storeWorkflow, appStoreConfig, stableConfig] = await Promise.all([
+    readFile(".github/workflows/desktop_store_publish.yaml", "utf8"),
+    readFile("apps/desktop/src-tauri/tauri.conf.app-store.json", "utf8").then(
+      JSON.parse,
+    ),
+    readFile("apps/desktop/src-tauri/tauri.conf.stable.json", "utf8").then(
+      JSON.parse,
+    ),
+  ]);
+
+  assert.match(storeWorkflow, /name: Compile Mac App Store asset catalog/);
+  assert.match(storeWorkflow, /xcrun actool/);
+  assert.match(storeWorkflow, /icons\/src\/stable\.icon/);
+  assert.match(storeWorkflow, /AppIcon\.icon/);
+  assert.match(storeWorkflow, /Contents\/Resources\/Assets\.car/);
+  assert.equal(
+    appStoreConfig.bundle.macOS.files["Resources/Assets.car"],
+    "./resources/app-store/Assets.car",
+  );
+  assert.equal(
+    stableConfig.bundle.macOS.files["Resources/Assets.car"],
+    undefined,
+  );
+});
+
 test("binds every release asset to a candidate run and detects replacement", async () => {
   const directory = await mkdtemp(
     path.join(os.tmpdir(), "anarlog-release-provenance-"),
