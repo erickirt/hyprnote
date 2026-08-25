@@ -23,6 +23,43 @@ on:
         description: "Upload to App Store Connect and submit the Microsoft Store update"
         type: boolean
         default: false
+    secrets:
+      APPLE_TEAM_ID:
+        required: false
+      APPSTORE_API_KEY_ID:
+        required: false
+      APPSTORE_API_PRIVATE_KEY:
+        required: false
+      APPSTORE_ISSUER_ID:
+        required: false
+      AZURE_AD_APPLICATION_SECRET:
+        required: false
+      CN_API_KEY:
+        required: false
+      KEYCHAIN_PASSWORD:
+        required: false
+      MAC_APP_STORE_APPLICATION_CERTIFICATE:
+        required: false
+      MAC_APP_STORE_APPLICATION_CERTIFICATE_PASSWORD:
+        required: false
+      MAC_APP_STORE_INSTALLER_CERTIFICATE:
+        required: false
+      MAC_APP_STORE_INSTALLER_CERTIFICATE_PASSWORD:
+        required: false
+      MAC_APP_STORE_PROVISIONING_PROFILE:
+        required: false
+      POSTHOG_API_KEY:
+        required: false
+      SELLER_ID:
+        required: false
+      SENTRY_DSN_HYPRNOTE_2:
+        required: false
+      VITE_PRO_PRODUCT_ID:
+        required: false
+      VITE_SUPABASE_ANON_KEY:
+        required: false
+      VITE_SUPABASE_URL:
+        required: false
   workflow_dispatch:
     inputs:
       version:

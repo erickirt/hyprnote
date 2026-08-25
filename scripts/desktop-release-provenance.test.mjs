@@ -297,7 +297,44 @@ test("stable desktop releases submit both store packages", async () => {
   assert.match(storePublishJob, /include_macos: true/);
   assert.match(storePublishJob, /include_windows: true/);
   assert.match(storePublishJob, /submit_to_stores: true/);
-  assert.match(storePublishJob, /secrets: inherit/);
+  assert.doesNotMatch(storePublishJob, /secrets: inherit/);
+
+  const expectedSecrets = [
+    "APPLE_TEAM_ID",
+    "APPSTORE_API_KEY_ID",
+    "APPSTORE_API_PRIVATE_KEY",
+    "APPSTORE_ISSUER_ID",
+    "AZURE_AD_APPLICATION_SECRET",
+    "CN_API_KEY",
+    "KEYCHAIN_PASSWORD",
+    "MAC_APP_STORE_APPLICATION_CERTIFICATE",
+    "MAC_APP_STORE_APPLICATION_CERTIFICATE_PASSWORD",
+    "MAC_APP_STORE_INSTALLER_CERTIFICATE",
+    "MAC_APP_STORE_INSTALLER_CERTIFICATE_PASSWORD",
+    "MAC_APP_STORE_PROVISIONING_PROFILE",
+    "POSTHOG_API_KEY",
+    "SELLER_ID",
+    "SENTRY_DSN_HYPRNOTE_2",
+    "VITE_PRO_PRODUCT_ID",
+    "VITE_SUPABASE_ANON_KEY",
+    "VITE_SUPABASE_URL",
+  ];
+  const declaredSecrets = [
+    ...storeWorkflow.matchAll(
+      /^      ([A-Z0-9_]+):\n        required: false$/gm,
+    ),
+  ].map((match) => match[1]);
+  const forwardedSecrets = [
+    ...storePublishJob.matchAll(
+      /^      ([A-Z0-9_]+): \$\{\{ secrets\.([A-Z0-9_]+) \}\}$/gm,
+    ),
+  ].map((match) => {
+    assert.equal(match[1], match[2]);
+    return match[1];
+  });
+
+  assert.deepEqual(declaredSecrets, expectedSecrets);
+  assert.deepEqual(forwardedSecrets, expectedSecrets);
 });
 
 test("binds every release asset to a candidate run and detects replacement", async () => {
