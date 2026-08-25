@@ -228,7 +228,6 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLICATION_CERT_ID: ${{ steps.apple-store-cert.outputs.application-cert-id }}
-          APPLICATION_CERT_SHA1: ${{ steps.apple-store-cert.outputs.application-cert-sha1 }}
           INSTALLER_CERT_ID: ${{ steps.apple-store-cert.outputs.installer-cert-id }}
           PROVISIONING_PROFILE: ${{ secrets.MAC_APP_STORE_PROVISIONING_PROFILE }}
         run: |
@@ -267,6 +266,16 @@ jobs:
               print(hashlib.sha1(certificate).hexdigest().upper())
           PY
           )
+          application_cert_sha1=$(
+            security find-identity -v "$RUNNER_TEMP/mac-app-store.keychain-db" |
+              awk -v identity="\"$APPLICATION_CERT_ID\"" \
+                'index($0, identity) { print $2; exit }'
+          )
+          if [[ ! "$application_cert_sha1" =~ ^[0-9A-Fa-f]{40}$ ]]; then
+            echo "::error::Could not read the imported Mac App Distribution certificate fingerprint"
+            exit 1
+          fi
+          application_cert_sha1="${application_cert_sha1^^}"
 
           profile_app_prefix="${profile_app_id%.com.hyprnote.desktop}"
           if [[ -z "$profile_app_prefix" || "$profile_app_prefix" == "$profile_app_id" ]]; then
@@ -281,7 +290,7 @@ jobs:
             echo "::error::Mac App Distribution certificate is not for Apple team $APPLE_TEAM_ID"
             exit 1
           fi
-          if ! grep -Fxq "$APPLICATION_CERT_SHA1" <<< "$profile_certificate_sha1s"; then
+          if ! grep -Fxq "$application_cert_sha1" <<< "$profile_certificate_sha1s"; then
             echo "::error::Provisioning profile does not contain the imported Mac App Distribution certificate"
             exit 1
           fi

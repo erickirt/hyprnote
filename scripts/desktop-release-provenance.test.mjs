@@ -360,6 +360,14 @@ test("Mac App Store builds include a compiled app icon catalog", async () => {
   assert.match(storeWorkflow, /Contents\/Resources\/Assets\.car/);
   assert.match(
     storeWorkflow,
+    /security find-identity -v "\$RUNNER_TEMP\/mac-app-store\.keychain-db"/,
+  );
+  assert.doesNotMatch(
+    storeWorkflow,
+    /APPLICATION_CERT_SHA1:.*application-cert-sha1/,
+  );
+  assert.match(
+    storeWorkflow,
     /\.bundle\.macOS\.files\["Resources\/Assets\.car"\]/,
   );
   assert.equal(
