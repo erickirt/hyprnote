@@ -324,6 +324,7 @@ jobs:
           asset_output="$RUNNER_TEMP/mac-app-store-assets"
           asset_source="$RUNNER_TEMP/AppIcon.icon"
           asset_catalog="apps/desktop/src-tauri/resources/app-store/Assets.car"
+          app_store_config="apps/desktop/src-tauri/tauri.conf.app-store.json"
           mkdir -p "$asset_output" "$(dirname "$asset_catalog")"
           cp -R apps/desktop/src-tauri/icons/src/stable.icon "$asset_source"
           xcrun actool \
@@ -345,6 +346,10 @@ jobs:
             exit 1
           fi
           cp "$asset_output/Assets.car" "$asset_catalog"
+          jq \
+            '.bundle.macOS.files["Resources/Assets.car"] = "./resources/app-store/Assets.car"' \
+            "$app_store_config" > "$RUNNER_TEMP/tauri.conf.app-store.json"
+          mv "$RUNNER_TEMP/tauri.conf.app-store.json" "$app_store_config"
       - name: Build signed Mac App Store application
         env:
           APPLE_SIGNING_IDENTITY: ${{ steps.apple-store-cert.outputs.application-cert-id }}

@@ -358,6 +358,10 @@ test("Mac App Store builds include a compiled app icon catalog", async () => {
   assert.match(storeWorkflow, /icons\/src\/stable\.icon/);
   assert.match(storeWorkflow, /AppIcon\.icon/);
   assert.match(storeWorkflow, /Contents\/Resources\/Assets\.car/);
+  assert.match(
+    storeWorkflow,
+    /\.bundle\.macOS\.files\["Resources\/Assets\.car"\]/,
+  );
   assert.equal(
     appStoreConfig.bundle.macOS.files["Resources/Assets.car"],
     "./resources/app-store/Assets.car",
