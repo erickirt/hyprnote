@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createSign } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 const apiOrigin = "https://api.appstoreconnect.apple.com";
@@ -31,6 +31,17 @@ export class AppStoreConnectError extends Error {
 
 function base64Url(value) {
   return Buffer.from(value).toString("base64url");
+}
+
+export function normalizePrivateKey(value) {
+  let normalized = value.trim();
+  if (normalized.startsWith('"') && normalized.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(normalized);
+      if (typeof parsed === "string") normalized = parsed.trim();
+    } catch {}
+  }
+  return `${normalized.replaceAll("\\r\\n", "\n").replaceAll("\\n", "\n")}\n`;
 }
 
 export function createAppStoreConnectToken({
@@ -455,7 +466,10 @@ async function main() {
     throw new Error(`Missing arguments: ${missing.join(", ")}`);
   }
 
-  const privateKey = await readFile(args["private-key"], "utf8");
+  const privateKey = normalizePrivateKey(
+    await readFile(args["private-key"], "utf8"),
+  );
+  await writeFile(args["private-key"], privateKey, { mode: 0o600 });
   const client = createAppStoreConnectClient({
     issuerId: args["issuer-id"],
     keyId: args["key-id"],

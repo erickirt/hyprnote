@@ -6,6 +6,7 @@ import {
   AppStoreConnectError,
   createAppStoreConnectClient,
   createAppStoreConnectToken,
+  normalizePrivateKey,
   publishMacApp,
 } from "./app-store-connect-submit.mjs";
 
@@ -44,6 +45,23 @@ test("creates an App Store Connect ES256 token", () => {
       Buffer.from(encodedSignature, "base64url"),
     ),
     true,
+  );
+});
+
+test("normalizes a JSON-escaped App Store Connect private key", () => {
+  const { privateKey } = generateKeyPairSync("ec", {
+    namedCurve: "P-256",
+  });
+  const pem = privateKey.export({ format: "pem", type: "pkcs8" });
+  const normalized = normalizePrivateKey(JSON.stringify(pem));
+
+  assert.equal(normalized, pem);
+  assert.doesNotThrow(() =>
+    createAppStoreConnectToken({
+      issuerId: "issuer-id",
+      keyId: "key-id",
+      privateKey: normalized,
+    }),
   );
 });
 
