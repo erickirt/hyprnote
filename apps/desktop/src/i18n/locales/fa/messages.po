@@ -2024,9 +2024,7 @@ msgstr ""
 msgid "General"
 msgstr ""
 
-#: src/session-sharing/draft-panel.tsx
 #: src/session-sharing/general-access.tsx
-#: src/session-sharing/management-panel.tsx
 msgid "General access"
 msgstr ""
 
@@ -2936,7 +2934,7 @@ msgid "Not installed"
 msgstr ""
 
 #: src/session-sharing/invite-recipients.tsx
-msgid "Not invited yet. Nothing is sent until you click Invite."
+msgid "Not invited"
 msgstr ""
 
 #: src/billing/trial-payment-reminder-dialog.tsx
