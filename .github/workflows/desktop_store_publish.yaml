@@ -228,6 +228,7 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLICATION_CERT_ID: ${{ steps.apple-store-cert.outputs.application-cert-id }}
+          APPLICATION_CERT_SHA1: ${{ steps.apple-store-cert.outputs.application-cert-sha1 }}
           INSTALLER_CERT_ID: ${{ steps.apple-store-cert.outputs.installer-cert-id }}
           PROVISIONING_PROFILE: ${{ secrets.MAC_APP_STORE_PROVISIONING_PROFILE }}
         run: |
@@ -254,6 +255,18 @@ jobs:
               -c 'Print :TeamIdentifier:0' \
               "$profile_plist"
           )
+          profile_certificate_sha1s=$(
+            python3 - "$profile_plist" <<'PY'
+          import hashlib
+          import plistlib
+          import sys
+
+          with open(sys.argv[1], "rb") as profile_file:
+              profile = plistlib.load(profile_file)
+          for certificate in profile.get("DeveloperCertificates", []):
+              print(hashlib.sha1(certificate).hexdigest().upper())
+          PY
+          )
 
           profile_app_prefix="${profile_app_id%.com.hyprnote.desktop}"
           if [[ -z "$profile_app_prefix" || "$profile_app_prefix" == "$profile_app_id" ]]; then
@@ -266,6 +279,10 @@ jobs:
           fi
           if [[ "$APPLICATION_CERT_ID" != *"($APPLE_TEAM_ID)"* ]]; then
             echo "::error::Mac App Distribution certificate is not for Apple team $APPLE_TEAM_ID"
+            exit 1
+          fi
+          if ! grep -Fxq "$APPLICATION_CERT_SHA1" <<< "$profile_certificate_sha1s"; then
+            echo "::error::Provisioning profile does not contain the imported Mac App Distribution certificate"
             exit 1
           fi
           if [[ "$INSTALLER_CERT_ID" != *"($APPLE_TEAM_ID)"* ]]; then
