@@ -1,5 +1,5 @@
 begin;
-select plan(36);
+select plan(44);
 
 select tests.create_supabase_user('invite_owner', 'invite-owner@example.com');
 select tests.create_supabase_user('invite_recipient', 'invite-recipient@example.com');
@@ -179,6 +179,16 @@ select ok(
       'public.list_workspace_memberships(uuid)',
       'EXECUTE'
     )
+    and has_function_privilege(
+      'authenticated',
+      'public.inspect_my_workspace_invitation(uuid,text)',
+      'EXECUTE'
+    )
+    and has_function_privilege(
+      'authenticated',
+      'public.resend_workspace_invitation(uuid)',
+      'EXECUTE'
+    )
     and not has_function_privilege(
       'anon',
       'public.create_workspace_invitation(uuid,text)',
@@ -208,6 +218,16 @@ select ok(
       'anon',
       'public.list_workspace_memberships(uuid)',
       'EXECUTE'
+    )
+    and not has_function_privilege(
+      'anon',
+      'public.inspect_my_workspace_invitation(uuid,text)',
+      'EXECUTE'
+    )
+    and not has_function_privilege(
+      'anon',
+      'public.resend_workspace_invitation(uuid)',
+      'EXECUTE'
     ),
   'Only authenticated clients can execute invitation RPC wrappers'
 );
@@ -226,7 +246,9 @@ select ok(
         'revoke_workspace_invitation',
         'revoke_workspace_membership',
         'list_workspace_invitations',
-        'list_workspace_memberships'
+        'list_workspace_memberships',
+        'inspect_my_workspace_invitation',
+        'resend_workspace_invitation'
       )
       and (
         not proc.prosecdef
@@ -241,7 +263,9 @@ select ok(
         'revoke_workspace_invitation',
         'revoke_workspace_membership',
         'list_workspace_invitations',
-        'list_workspace_memberships'
+        'list_workspace_memberships',
+        'inspect_my_workspace_invitation',
+        'resend_workspace_invitation'
       )
       and (
         proc.prosecdef
@@ -412,6 +436,26 @@ select throws_ok(
   'A valid token cannot be accepted by an account with the wrong email'
 );
 
+select results_eq(
+  $$
+    select count(*)
+    from public.inspect_my_workspace_invitation(
+      (
+        select invitation_id
+        from workspace_invitation_test_state
+        where name = 'first_invite'
+      ),
+      (
+        select invite_token
+        from workspace_invitation_test_state
+        where name = 'first_invite'
+      )
+    )
+  $$,
+  array[0::bigint],
+  'A valid token cannot be inspected by an account with the wrong email'
+);
+
 select tests.clear_authentication();
 select tests.authenticate_as('invite_recipient');
 
@@ -430,6 +474,42 @@ select throws_ok(
   '22023',
   'workspace invitation is invalid or unavailable',
   'A recipient cannot accept with the wrong token'
+);
+
+select results_eq(
+  $$
+    select count(*)
+    from public.inspect_my_workspace_invitation(
+      (
+        select invitation_id
+        from workspace_invitation_test_state
+        where name = 'first_invite'
+      ),
+      'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    )
+  $$,
+  array[0::bigint],
+  'A recipient cannot inspect with the wrong token'
+);
+
+select results_eq(
+  $$
+    select status, workspace_name
+    from public.inspect_my_workspace_invitation(
+      (
+        select invitation_id
+        from workspace_invitation_test_state
+        where name = 'first_invite'
+      ),
+      (
+        select invite_token
+        from workspace_invitation_test_state
+        where name = 'first_invite'
+      )
+    )
+  $$,
+  $$values ('pending'::text, 'Invitation test workspace'::text)$$,
+  'The intended recipient can inspect a pending invitation'
 );
 
 select lives_ok(
@@ -457,6 +537,35 @@ select lives_ok(
     )
   $$,
   'The intended recipient can atomically accept the invitation'
+);
+
+select results_eq(
+  $$
+    select status, workspace_id
+    from public.inspect_my_workspace_invitation(
+      (
+        select invitation_id
+        from workspace_invitation_test_state
+        where name = 'first_invite'
+      ),
+      (
+        select invite_token
+        from workspace_invitation_test_state
+        where name = 'first_invite'
+      )
+    )
+  $$,
+  $$
+    values (
+      'accepted'::text,
+      (
+        select workspace_id
+        from workspace_invitation_test_state
+        where name = 'shared_workspace'
+      )
+    )
+  $$,
+  'The intended recipient can inspect an accepted invitation'
 );
 
 select results_eq(
@@ -769,6 +878,124 @@ select throws_ok(
 select tests.clear_authentication();
 select tests.authenticate_as_hyprnote_pro('invite_owner');
 
+select lives_ok(
+  $$
+    insert into workspace_invitation_test_state (
+      name,
+      invitation_id,
+      invite_token,
+      invitation_expires_at,
+      was_created
+    )
+    select
+      'resend_source',
+      invitation_id,
+      invite_token,
+      invitation_expires_at,
+      was_created
+    from public.create_workspace_invitation(
+      (
+        select workspace_id
+        from workspace_invitation_test_state
+        where name = 'shared_workspace'
+      ),
+      'invite-other@example.com'
+    )
+  $$,
+  'An owner can invite again after cancelling a previous invitation'
+);
+
+select lives_ok(
+  $$
+    insert into workspace_invitation_test_state (
+      name,
+      invitation_id,
+      invite_token,
+      invitation_expires_at
+    )
+    select
+      'resend_result',
+      invitation_id,
+      invite_token,
+      invitation_expires_at
+    from public.resend_workspace_invitation(
+      (
+        select invitation_id
+        from workspace_invitation_test_state
+        where name = 'resend_source'
+      )
+    )
+  $$,
+  'An owner can rotate a pending invitation atomically'
+);
+
+select ok(
+  (
+    select rotated.invitation_id <> original.invitation_id
+      and length(rotated.invite_token) = 43
+      and rotated.invitation_expires_at > now() + interval '29 days'
+      and rotated.invitation_expires_at <= now() + interval '30 days 1 minute'
+    from workspace_invitation_test_state as rotated
+    join workspace_invitation_test_state as original
+      on original.name = 'resend_source'
+    where rotated.name = 'resend_result'
+  )
+    and exists (
+      select 1
+      from public.list_workspace_invitations(
+        (
+          select workspace_id
+          from workspace_invitation_test_state
+          where name = 'shared_workspace'
+        )
+      )
+      where invitation_id = (
+        select invitation_id
+        from workspace_invitation_test_state
+        where name = 'resend_source'
+      )
+        and revoked_at is not null
+        and accepted_at is null
+    )
+    and (
+      select invitation_id
+      from public.list_workspace_invitations(
+        (
+          select workspace_id
+          from workspace_invitation_test_state
+          where name = 'shared_workspace'
+        )
+      )
+      where invitee_email = 'invite-other@example.com'
+        and accepted_at is null
+        and revoked_at is null
+    ) = (
+      select invitation_id
+      from workspace_invitation_test_state
+      where name = 'resend_result'
+    ),
+  'Resend revokes the previous pending row only after creating its replacement'
+);
+
+select throws_ok(
+  $$
+    select *
+    from public.resend_workspace_invitation(
+      (
+        select invitation_id
+        from workspace_invitation_test_state
+        where name = 'first_invite'
+      )
+    )
+  $$,
+  '22023',
+  'workspace invitation is unavailable',
+  'An accepted invitation cannot be rotated'
+);
+
+select tests.clear_authentication();
+select tests.authenticate_as_hyprnote_pro('invite_owner');
+
 select throws_ok(
   $$
     select *
@@ -795,7 +1022,7 @@ select results_eq(
     from public.workspace_invitations
     order by created_at, id
   $$,
-  array[32, 32, 32]::integer[],
+  array[32, 32, 32, 32, 32]::integer[],
   'Only fixed-length SHA-256 token digests are stored'
 );
 
