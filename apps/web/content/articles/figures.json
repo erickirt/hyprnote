@@ -34,7 +34,16 @@
   "best-ai-notetaker": [],
   "best-ai-notetaker-for-in-person-meetings": [],
   "best-ai-notetaker-for-microsoft-teams": [],
-  "best-ai-notetaker-for-zoom": [],
+  "best-ai-notetaker-for-zoom": [
+    {
+      "filename": "zoom-capture-paths.png",
+      "content": "Title: Where Zoom Audio Goes\nZoom meeting to native Zoom AI to Zoom workspace\nZoom meeting to desktop capture to local record or vendor workspace\nZoom meeting to browser extension to vendor transcript workspace\nZoom meeting to visible meeting assistant to vendor cloud workspace",
+      "context": "Render four separate horizontal data paths from Zoom meeting to the final record. Do not merge the paths at the end. Keep every destination. Do not add review questions, product names, pros, cons, or invented labels.",
+      "visualQuery": "flowchart",
+      "orientation": "horizontal",
+      "width": 1200
+    }
+  ],
   "best-ai-notetakers-google-meet": [],
   "bot-free-ai-meeting-assistants": [],
   "can-you-transcribe-meetings-without-sending-data-to-cloud": [
