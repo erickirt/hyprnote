@@ -108,6 +108,19 @@ export async function inferAutomaticSpeakerAssignments({
     [...clustersByTranscript.entries()].map(
       async ([transcriptId, clusters]) => {
         const directMappings: SpeakerAttributionMapping[] = [];
+        const isClosedOneOnOne =
+          context.candidates.length === 1 && clusters.length === 1;
+        if (isClosedOneOnOne) {
+          return {
+            transcriptId,
+            mappings: completeClosedCandidateSet(
+              clusters,
+              context.candidates,
+              directMappings,
+            ),
+          };
+        }
+
         const usePublicEvidenceFallback =
           context.candidates.length === 2 &&
           clusters.length === 2 &&
@@ -243,11 +256,8 @@ function buildSpeakerAttributionContext(
   const candidates = Array.from(
     new Map(
       snapshot.participants
-        .filter(
-          (participant) =>
-            participant.humanId &&
-            participant.humanId !== snapshot.ownerUserId &&
-            participant.name.trim(),
+        .filter((participant) =>
+          isRemoteAttributionCandidate(participant, snapshot),
         )
         .map((participant) => [
           participant.humanId,
@@ -261,7 +271,7 @@ function buildSpeakerAttributionContext(
   ).sort((left, right) => left.humanId.localeCompare(right.humanId));
 
   if (
-    candidates.length < 2 ||
+    candidates.length === 0 ||
     candidates.length > MAX_ATTRIBUTION_ITEMS ||
     new Set(candidates.map((candidate) => candidate.name.toLocaleLowerCase()))
       .size !== candidates.length
@@ -374,7 +384,7 @@ function buildSpeakerAttributionContext(
       });
 
     if (
-      transcriptClusters.length < 2 ||
+      transcriptClusters.length === 0 ||
       transcriptClusters.length > MAX_ATTRIBUTION_ITEMS ||
       candidates.length < transcriptClusters.length ||
       transcriptClusters.some(
@@ -845,6 +855,23 @@ function attributionTokens(value: string) {
       }
       return token.length > 5 ? token.slice(0, 5) : token;
     });
+}
+
+function isRemoteAttributionCandidate(
+  participant: SessionContentSnapshot["participants"][number],
+  snapshot: SessionContentSnapshot,
+): boolean {
+  if (
+    !participant.humanId ||
+    participant.humanId === snapshot.ownerUserId ||
+    !participant.name.trim()
+  ) {
+    return false;
+  }
+
+  const ownerEmail = snapshot.ownerEmail?.trim().toLowerCase();
+  const participantEmail = participant.email?.trim().toLowerCase();
+  return !ownerEmail || !participantEmail || ownerEmail !== participantEmail;
 }
 
 function completeClosedCandidateSet(

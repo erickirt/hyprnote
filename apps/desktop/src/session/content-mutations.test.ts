@@ -226,6 +226,10 @@ describe("session content SQLite corrections", () => {
     expect(transcriptStatement?.sql).toContain("words_json = ?");
     expect(transcriptStatement?.sql).toContain("speaker_hints_json = ?");
     expect(transcriptStatement?.sql).toContain("session_participants");
+    expect(transcriptStatement?.sql).toContain("self_human.email");
+    expect(transcriptStatement?.sql).toContain(
+      "COALESCE(NULLIF(human.email, ''), participant.email)",
+    );
     expect(transcriptStatement?.sql).toContain("json_each(?)");
     expect(transcriptStatement?.params).toEqual([
       '[{"type":"automatic_speaker_assignment"}]',
@@ -236,9 +240,11 @@ describe("session content SQLite corrections", () => {
       "[]",
       "session-1",
       "user-1",
+      "user-1",
       '["human-1","human-2"]',
       '["human-1","human-2"]',
       "session-1",
+      "user-1",
       "user-1",
     ]);
     expect(consoleWarn).toHaveBeenCalledOnce();
