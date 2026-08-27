@@ -10,7 +10,9 @@ use atspi::{AccessibilityConnection, CoordType, ObjectRef, Role, State};
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
 
-use super::analysis::{extract_chat_messages, meeting_chat_surface_is_visible};
+use super::analysis::{
+    extract_chat_messages, meeting_chat_surface_is_visible, slack_huddle_is_active,
+};
 use super::context::{
     browser_capture_context_id, is_platform_chat_composer, is_platform_send_button,
     native_capture_context_id, slack_capture_context_id, validated_chat_scope,
@@ -29,12 +31,13 @@ use super::types::{
 use super::{
     BrowserMeetingSnapshot, MAX_NODES, MAX_TREE_DEPTH, MeetingAccessibilityInspection,
     browser_meeting_root_from_snapshot, browser_window_has_provider_signal, chat_input_is_owned,
-    inspection_label, is_chat_priority_label, is_slack_huddle_composer_in_thread,
-    is_slack_send_now_in_thread, is_slack_thread_control, native_meeting_window_is_validated,
-    slack_huddle_context, slack_thread_container_path, unique_scope_for_count,
-    validate_meeting_chat_message,
+    inspection_label, is_chat_priority_label, is_enabled_slack_leave_control,
+    is_slack_huddle_composer_in_thread, is_slack_send_now_in_thread, is_slack_thread_control,
+    native_meeting_window_is_validated, slack_huddle_context, slack_thread_container_path,
+    unique_scope_for_count, validate_meeting_chat_message,
 };
 
+#[derive(Clone)]
 struct LiveNode {
     node: AxNode,
     ancestors: Vec<AxAncestor>,
@@ -481,6 +484,61 @@ fn slack_roots_from_windows(
             let nodes = ax_nodes(&live);
             let (label, channel) = slack_huddle_context(&nodes)?;
             Some((channel, label, live))
+        })
+        .collect()
+}
+
+fn slack_chat_roots_from_windows(
+    windows: Vec<(Option<String>, Vec<LiveNode>, bool)>,
+) -> Vec<(String, String, Vec<LiveNode>)> {
+    let mut contexts = windows
+        .iter()
+        .filter(|(_, _, complete)| *complete)
+        .filter_map(|(_, live, _)| slack_huddle_context(&ax_nodes(live)))
+        .collect::<Vec<_>>();
+    contexts.sort();
+    contexts.dedup();
+    let [(label, channel)] = contexts.as_slice() else {
+        return Vec::new();
+    };
+    let Some(active_control) = windows.iter().find_map(|(_, live, complete)| {
+        if !complete
+            || slack_huddle_context(&ax_nodes(live)).as_ref()
+                != Some(&(label.clone(), channel.clone()))
+        {
+            return None;
+        }
+        live.iter()
+            .find(|node| is_enabled_slack_leave_control(&node.node))
+            .cloned()
+    }) else {
+        return Vec::new();
+    };
+
+    windows
+        .into_iter()
+        .filter_map(|(_, mut live, complete)| {
+            if !complete {
+                return None;
+            }
+            let mut composers = live.iter().filter_map(|node| {
+                is_slack_huddle_composer_in_thread(&node.node, &node.ancestors, channel)
+                    .then(|| slack_thread_container_path(&node.ancestors, channel))
+                    .flatten()
+            });
+            let thread_path = composers.next()?.to_vec();
+            if composers.next().is_some() {
+                return None;
+            }
+            for node in &mut live {
+                if node.node.tree_path.starts_with(&thread_path) {
+                    node.node.within_slack_huddle_scope = true;
+                }
+            }
+            if !slack_huddle_is_active(&ax_nodes(&live)) {
+                live.push(active_control.clone());
+            }
+            Some((channel.clone(), label.clone(), live))
         })
         .collect()
 }
@@ -1323,7 +1381,7 @@ pub(super) fn capture_meeting_chat_messages(bundle_ids: Vec<String>) -> MeetingC
                         }
                     }
                     MeetingPlatform::Slack => {
-                        for (channel, label, live) in slack_roots_from_windows(windows) {
+                        for (channel, label, live) in slack_chat_roots_from_windows(windows) {
                             let composer = live.iter().find(|node| {
                                 is_slack_huddle_composer_in_thread(
                                     &node.node,
@@ -1439,6 +1497,112 @@ mod tests {
             bus_name: "org.test.Browser".to_string(),
             path: format!("/org/test/{index}"),
         }
+    }
+
+    fn live_node(index: usize, role: &str, title: &str, path: &[usize]) -> LiveNode {
+        LiveNode {
+            node: AxNode {
+                index,
+                tree_path: path.to_vec(),
+                element_hash: Some(index),
+                role: Some(role.to_string()),
+                identifier: None,
+                title: Some(title.to_string()),
+                value: None,
+                description: None,
+                placeholder: None,
+                enabled: Some(true),
+                settable_value: false,
+                bounds: Some(AxRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 320.0,
+                    height: 48.0,
+                }),
+                text: title.to_ascii_lowercase(),
+                within_zoom_meeting_scope: false,
+                within_zoom_chat_scope: false,
+                within_slack_huddle_scope: false,
+            },
+            ancestors: Vec::new(),
+            bus_name: "org.test.Slack".to_string(),
+            path: format!("/org/test/{index}"),
+        }
+    }
+
+    #[test]
+    fn slack_chat_scope_pairs_main_huddle_identity_with_popout_thread() {
+        let main = vec![
+            live_node(0, "AXGroup", "Huddle in test", &[0]),
+            live_node(1, "AXButton", "Leave Huddle", &[1]),
+        ];
+        let mut composer = live_node(2, "AXTextArea", "Message to test", &[2, 0]);
+        composer.node.settable_value = true;
+        composer.ancestors.push(AxAncestor {
+            path: vec![2],
+            labels: vec!["Thread in test (private channel, 1 reply)".to_string()],
+        });
+        let message = live_node(3, "AXCell", "John Jeong: Ship it. 12:03 PM.", &[2, 1]);
+
+        let roots = slack_chat_roots_from_windows(vec![
+            (
+                Some("test (Channel) - Fastrepl - Slack".to_string()),
+                main,
+                true,
+            ),
+            (
+                Some("test - Fastrepl - Slack".to_string()),
+                vec![composer, message],
+                true,
+            ),
+        ]);
+
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].0, "test");
+        assert_eq!(roots[0].1, "Huddle in test");
+        assert!(roots[0].2.iter().any(|node| node.node.index == 3));
+        let messages = extract_chat_messages(
+            &MeetingPlatform::Slack,
+            &MeetingSurface::Native,
+            &ax_nodes(&roots[0].2),
+        );
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].sender.as_deref(), Some("John Jeong"));
+        assert_eq!(messages[0].timestamp.as_deref(), Some("12:03 PM"));
+        assert_eq!(messages[0].text, "Ship it");
+    }
+
+    #[test]
+    fn slack_chat_scope_rejects_ambiguous_huddle_identity() {
+        let mut composer = live_node(4, "AXTextArea", "Message to test", &[4, 0]);
+        composer.node.settable_value = true;
+        composer.ancestors.push(AxAncestor {
+            path: vec![4],
+            labels: vec!["Thread in test".to_string()],
+        });
+
+        assert!(
+            slack_chat_roots_from_windows(vec![
+                (
+                    Some("test".to_string()),
+                    vec![
+                        live_node(0, "AXGroup", "Huddle in test", &[0]),
+                        live_node(1, "AXButton", "Leave Huddle", &[1]),
+                    ],
+                    true,
+                ),
+                (
+                    Some("random".to_string()),
+                    vec![
+                        live_node(2, "AXGroup", "Huddle in random", &[0]),
+                        live_node(3, "AXButton", "Leave Huddle", &[1]),
+                    ],
+                    true,
+                ),
+                (Some("thread".to_string()), vec![composer], true),
+            ])
+            .is_empty()
+        );
     }
 
     #[test]
