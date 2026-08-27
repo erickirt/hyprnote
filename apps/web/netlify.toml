@@ -52,18 +52,31 @@ to = "https://github.com/fastrepl/anarlog/releases/download/:release/anarlog-lin
 status = 302
 force = true
 
-# Desktop updater JSON and installer binaries stay on CrabNebula; expose them
-# on anarlog.so so clients do not depend on desktop2.hyprnote.com. Keep
-# /download for the marketing page.
+# Desktop updater JSON and installer binaries stay on CrabNebula. Serve them
+# from desktop.anarlog.so so they do not collide with the marketing site.
+# desktop2.hyprnote.com already CNAMEs here; also HTTP-redirect so existing
+# Homebrew/download URLs land on the canonical host.
 [[redirects]]
-from = "/update/*"
+from = "https://desktop.anarlog.so/update/*"
 to = "https://cdn.crabnebula.app/update/fastrepl/hyprnote2/:splat"
 status = 302
 force = true
 
 [[redirects]]
-from = "/releases/*"
+from = "https://desktop.anarlog.so/download/*"
 to = "https://cdn.crabnebula.app/download/fastrepl/hyprnote2/:splat"
+status = 302
+force = true
+
+[[redirects]]
+from = "https://desktop.anarlog.so/"
+to = "https://anarlog.so/download"
+status = 302
+force = true
+
+[[redirects]]
+from = "https://desktop2.hyprnote.com/*"
+to = "https://desktop.anarlog.so/:splat"
 status = 302
 force = true
 
