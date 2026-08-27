@@ -48,6 +48,12 @@ export function getShortLinkSharedNoteOgImageUrl(linkId: string) {
 
 type StructuredDataNode = Record<string, unknown>;
 
+type SoftwareReview = {
+  author: string;
+  reviewBody: string;
+  url: string;
+};
+
 export function getStructuredDataGraph(nodes: StructuredDataNode[]) {
   return {
     "@context": "https://schema.org",
@@ -69,6 +75,7 @@ export function getSoftwareApplicationJsonLd({
   description,
   featureList,
   aggregateOffer,
+  reviews,
 }: {
   url?: string;
   description: string;
@@ -78,6 +85,7 @@ export function getSoftwareApplicationJsonLd({
     highPrice: number;
     offerCount: number;
   };
+  reviews?: SoftwareReview[];
 }) {
   return {
     "@type": "SoftwareApplication",
@@ -89,6 +97,19 @@ export function getSoftwareApplicationJsonLd({
     downloadUrl: getCanonicalUrl("/download"),
     publisher: getOrganizationJsonLd(),
     ...(featureList ? { featureList } : {}),
+    ...(reviews
+      ? {
+          review: reviews.map(({ author, reviewBody, url: reviewUrl }) => ({
+            "@type": "Review",
+            author: {
+              "@type": "Person",
+              name: author,
+            },
+            reviewBody,
+            url: reviewUrl,
+          })),
+        }
+      : {}),
     ...(aggregateOffer
       ? {
           offers: {

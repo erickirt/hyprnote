@@ -1,7 +1,7 @@
 import { MDXContent } from "@content-collections/mdx/react";
 import { ArrowRight } from "@phosphor-icons/react";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { type Article, allArticles } from "content-collections";
+import type { Article, ArticleSummary } from "content-collections";
 import {
   Children,
   cloneElement,
@@ -30,11 +30,16 @@ const blogMdxComponents = {
 export const Route = createFileRoute("/blog/$slug")({
   component: Component,
   loader: async ({ params }) => {
+    const { allArticles, allArticleSummaries } =
+      await import("content-collections");
     const article = allArticles.find((a: Article) => a.slug === params.slug);
     if (!article) {
       throw notFound();
     }
-    return { article };
+    return {
+      article,
+      relatedArticles: getRelatedArticles(article, allArticleSummaries),
+    };
   },
   head: ({ loaderData }) => {
     const article = loaderData?.article;
@@ -97,8 +102,7 @@ export const Route = createFileRoute("/blog/$slug")({
 });
 
 function Component() {
-  const { article } = Route.useLoaderData();
-  const relatedArticles = getRelatedArticles(article);
+  const { article, relatedArticles } = Route.useLoaderData();
   const authors = Array.isArray(article.author)
     ? article.author.join(", ")
     : article.author;
@@ -160,8 +164,11 @@ function Component() {
   );
 }
 
-function getRelatedArticles(article: Article) {
-  const sortedArticles = [...allArticles].sort(
+function getRelatedArticles(
+  article: Article,
+  articleSummaries: ArticleSummary[],
+) {
+  const sortedArticles = [...articleSummaries].sort(
     (a, b) =>
       new Date(b.date).getTime() - new Date(a.date).getTime() ||
       a.slug.localeCompare(b.slug),
@@ -177,7 +184,7 @@ function getRelatedArticles(article: Article) {
   const neighbors = [
     sortedArticles[articleIndex - 1],
     sortedArticles[articleIndex + 1],
-  ].filter((candidate): candidate is Article => Boolean(candidate));
+  ].filter((candidate): candidate is ArticleSummary => Boolean(candidate));
   const sameCategory = sortedArticles.find(
     (candidate) =>
       candidate.slug !== article.slug &&
@@ -191,11 +198,11 @@ function getRelatedArticles(article: Article) {
   );
 
   return [...neighbors, sameCategory ?? fallback].filter(
-    (candidate): candidate is Article => Boolean(candidate),
+    (candidate): candidate is ArticleSummary => Boolean(candidate),
   );
 }
 
-function RelatedArticles({ articles }: { articles: Article[] }) {
+function RelatedArticles({ articles }: { articles: ArticleSummary[] }) {
   if (articles.length === 0) {
     return null;
   }

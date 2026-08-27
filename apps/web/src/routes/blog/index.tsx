@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { allArticles } from "content-collections";
+import allArticleSummaries from "article-summaries";
 
 import { SiteFooter } from "@/components/site-footer";
 import { formatBlogDate } from "@/lib/blog-date";
@@ -23,7 +23,7 @@ export const Route = createFileRoute("/blog/")({
 });
 
 function Component() {
-  const sortedArticles = [...allArticles].sort(
+  const sortedArticles = [...allArticleSummaries].sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
   );
 

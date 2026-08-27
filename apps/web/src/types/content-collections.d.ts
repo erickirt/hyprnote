@@ -5,6 +5,12 @@ import type configuration from "../../content-collections";
 export type Article = GetTypeByName<typeof configuration, "articles">;
 export declare const allArticles: Array<Article>;
 
+export type ArticleSummary = GetTypeByName<
+  typeof configuration,
+  "articleSummaries"
+>;
+export declare const allArticleSummaries: Array<ArticleSummary>;
+
 export type Legal = GetTypeByName<typeof configuration, "legal">;
 export declare const allLegals: Array<Legal>;
 

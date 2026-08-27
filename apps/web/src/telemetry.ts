@@ -1,13 +1,13 @@
-import { HoneycombWebSDK } from "@honeycombio/opentelemetry-web";
-import { getWebAutoInstrumentations } from "@opentelemetry/auto-instrumentations-web";
-
 import { env } from "./env";
 import { isTelemetryPrivateLocation } from "./lib/auth-route-privacy";
 import { hasGlobalPrivacyControl } from "./lib/global-privacy-control";
 
+type BrowserTelemetrySdk =
+  import("@honeycombio/opentelemetry-web").HoneycombWebSDK;
+
 declare global {
   interface Window {
-    __anarlogWebOtelSdk?: HoneycombWebSDK;
+    __anarlogWebOtelSdk?: BrowserTelemetrySdk;
   }
 }
 
@@ -77,7 +77,7 @@ function getPropagationTargets(): string[] {
   return [...targets];
 }
 
-export function bootstrapBrowserTelemetry() {
+export async function bootstrapBrowserTelemetry() {
   if (
     typeof window === "undefined" ||
     hasGlobalPrivacyControl() ||
@@ -88,11 +88,24 @@ export function bootstrapBrowserTelemetry() {
 
   const endpoint = env.VITE_OTEL_EXPORTER_OTLP_ENDPOINT;
 
-  if (!endpoint) {
+  if (!endpoint || window.__anarlogWebOtelSdk) {
     return;
   }
 
-  if (window.__anarlogWebOtelSdk) {
+  const [{ HoneycombWebSDK }, { getWebAutoInstrumentations }] =
+    await Promise.all([
+      import("@honeycombio/opentelemetry-web"),
+      import("@opentelemetry/auto-instrumentations-web"),
+    ]);
+
+  if (
+    hasGlobalPrivacyControl() ||
+    isTelemetryPrivateLocation(
+      window.location.pathname,
+      window.location.search,
+    ) ||
+    window.__anarlogWebOtelSdk
+  ) {
     return;
   }
 

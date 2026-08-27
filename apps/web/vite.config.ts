@@ -3,6 +3,7 @@ import netlify from "@netlify/vite-plugin-tanstack-start";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 import { generateSitemap } from "tanstack-router-sitemap";
 import { defineConfig } from "vite";
 
@@ -57,6 +58,14 @@ const config = defineConfig(() => {
       noExternal: ["posthog-js", "@posthog/react", "react-tweet"],
     },
     resolve: {
+      alias: {
+        "article-summaries": fileURLToPath(
+          new URL(
+            "./.content-collections/generated/allArticleSummaries.js",
+            import.meta.url,
+          ),
+        ),
+      },
       tsconfigPaths: true,
     },
     preview: {

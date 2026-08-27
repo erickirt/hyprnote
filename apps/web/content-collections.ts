@@ -6,29 +6,31 @@ import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import { z } from "zod";
 
+const articleSchema = z.object({
+  display_title: z.string().optional(),
+  meta_title: z.string().default(""),
+  meta_description: z.string().default(""),
+  author: z.union([z.string(), z.array(z.string())]),
+  date: z.string(),
+  featured: z.boolean().optional(),
+  ready_for_review: z.boolean().default(false),
+  category: z
+    .enum([
+      "Product",
+      "Comparisons",
+      "Engineering",
+      "Founders' notes",
+      "Guides",
+    ])
+    .optional(),
+});
+
 const articles = defineCollection({
   name: "articles",
   directory: "content/articles",
   include: "*.mdx",
   exclude: "AGENTS.md",
-  schema: z.object({
-    display_title: z.string().optional(),
-    meta_title: z.string().default(""),
-    meta_description: z.string().default(""),
-    author: z.union([z.string(), z.array(z.string())]),
-    date: z.string(),
-    featured: z.boolean().optional(),
-    ready_for_review: z.boolean().default(false),
-    category: z
-      .enum([
-        "Product",
-        "Comparisons",
-        "Engineering",
-        "Founders' notes",
-        "Guides",
-      ])
-      .optional(),
-  }),
+  schema: articleSchema,
   transform: async (document, context) => {
     const mdx = await compileMDX(context, document, {
       remarkPlugins: [remarkGfm, mdxMermaid],
@@ -58,6 +60,28 @@ const articles = defineCollection({
       slug,
       author,
       title,
+    };
+  },
+});
+
+const articleSummaries = defineCollection({
+  name: "articleSummaries",
+  directory: "content/articles",
+  include: "*.mdx",
+  exclude: "AGENTS.md",
+  schema: articleSchema,
+  transform: (document) => {
+    const slug = document._meta.path.replace(/\.mdx$/, "");
+    const rawAuthor = document.author || "Anarlog Team";
+    const author = Array.isArray(rawAuthor) ? rawAuthor : [rawAuthor];
+
+    return {
+      slug,
+      author,
+      title: document.display_title || document.meta_title,
+      meta_description: document.meta_description,
+      date: document.date,
+      category: document.category,
     };
   },
 });
@@ -116,5 +140,13 @@ const shortcuts = defineCollection({
 });
 
 export default defineConfig({
-  content: [articles, legal, docs, handbook, templates, shortcuts],
+  content: [
+    articles,
+    articleSummaries,
+    legal,
+    docs,
+    handbook,
+    templates,
+    shortcuts,
+  ],
 } as any);

@@ -153,11 +153,14 @@ export function WebProviders({
 
 function BrowserTelemetryRouteGuard({ enabled }: { enabled: boolean }) {
   useMountEffect(() => {
-    if (enabled) {
-      bootstrapBrowserTelemetry();
-    } else {
+    if (!enabled) {
       stopBrowserTelemetry();
+      return;
     }
+
+    return runWhenIdle(() => {
+      void bootstrapBrowserTelemetry();
+    });
   });
 
   return null;
