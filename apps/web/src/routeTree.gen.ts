@@ -30,14 +30,13 @@ import { Route as ChangelogVersionRouteImport } from './routes/changelog/$versio
 import { Route as BlogSlugRouteImport } from './routes/blog/$slug'
 import { Route as ApiTemplatesRouteImport } from './routes/api/templates'
 import { Route as ApiShortcutsRouteImport } from './routes/api/shortcuts'
-import { Route as ApiMediaUploadRouteImport } from './routes/api/media-upload'
 import { Route as ViewAppRouteRouteImport } from './routes/_view/app/route'
 import { Route as ViewDownloadIndexRouteImport } from './routes/_view/download/index'
 import { Route as ViewAppIndexRouteImport } from './routes/_view/app/index'
+import { Route as TeamInviteInvitationIdRouteImport } from './routes/team/invite/$invitationId'
 import { Route as SharePublicPublicSlugRouteImport } from './routes/share/public/$publicSlug'
 import { Route as ShareLinkShareIdRouteImport } from './routes/share/link/$shareId'
 import { Route as ShareInviteInvitationIdRouteImport } from './routes/share/invite/$invitationId'
-import { Route as TeamInviteInvitationIdRouteImport } from './routes/team/invite/$invitationId'
 import { Route as ApiWebhooksSlackInteractiveRouteImport } from './routes/api/webhooks/slack-interactive'
 import { Route as ApiTweetIdRouteImport } from './routes/api/tweet.$id'
 import { Route as ApiAssetsSplatRouteImport } from './routes/api/assets.$'
@@ -54,13 +53,6 @@ import { Route as ViewAppIntegrationRouteImport } from './routes/_view/app/integ
 import { Route as ViewAppCheckoutRouteImport } from './routes/_view/app/checkout'
 import { Route as ViewAppAccountRouteImport } from './routes/_view/app/account'
 import { Route as ApiOgBlogSlugRouteImport } from './routes/api/og/blog/$slug'
-import { Route as ApiAdminMediaUploadRouteImport } from './routes/api/admin/media/upload'
-import { Route as ApiAdminMediaRegisterRouteImport } from './routes/api/admin/media/register'
-import { Route as ApiAdminMediaMoveRouteImport } from './routes/api/admin/media/move'
-import { Route as ApiAdminMediaListRouteImport } from './routes/api/admin/media/list'
-import { Route as ApiAdminMediaDownloadRouteImport } from './routes/api/admin/media/download'
-import { Route as ApiAdminMediaDeleteRouteImport } from './routes/api/admin/media/delete'
-import { Route as ApiAdminMediaCreateFolderRouteImport } from './routes/api/admin/media/create-folder'
 import { Route as ApiAdminKanbanUpdateRouteImport } from './routes/api/admin/kanban/update'
 import { Route as ApiAdminKanbanProjectsRouteImport } from './routes/api/admin/kanban/projects'
 import { Route as ApiAdminKanbanItemsRouteImport } from './routes/api/admin/kanban/items'
@@ -78,7 +70,6 @@ import { Route as ApiAdminContentDuplicateRouteImport } from './routes/api/admin
 import { Route as ApiAdminContentDeleteRouteImport } from './routes/api/admin/content/delete'
 import { Route as ApiAdminContentCreateRouteImport } from './routes/api/admin/content/create'
 import { Route as ApiAdminContentAuditRouteImport } from './routes/api/admin/content/audit'
-import { Route as ApiAdminBlogUploadImageRouteImport } from './routes/api/admin/blog/upload-image'
 import { Route as ApiOgShareTLinkIdRouteImport } from './routes/api/og/share/t/$linkId'
 import { Route as ApiOgSharePublicPublicSlugRouteImport } from './routes/api/og/share/public/$publicSlug'
 import { Route as ApiOgShareLinkShareIdRouteImport } from './routes/api/og/share/link/$shareId'
@@ -187,11 +178,6 @@ const ApiShortcutsRoute = ApiShortcutsRouteImport.update({
   path: '/api/shortcuts',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiMediaUploadRoute = ApiMediaUploadRouteImport.update({
-  id: '/api/media-upload',
-  path: '/api/media-upload',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ViewAppRouteRoute = ViewAppRouteRouteImport.update({
   id: '/app',
   path: '/app',
@@ -207,6 +193,11 @@ const ViewAppIndexRoute = ViewAppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ViewAppRouteRoute,
 } as any)
+const TeamInviteInvitationIdRoute = TeamInviteInvitationIdRouteImport.update({
+  id: '/team/invite/$invitationId',
+  path: '/team/invite/$invitationId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SharePublicPublicSlugRoute = SharePublicPublicSlugRouteImport.update({
   id: '/share/public/$publicSlug',
   path: '/share/public/$publicSlug',
@@ -220,11 +211,6 @@ const ShareLinkShareIdRoute = ShareLinkShareIdRouteImport.update({
 const ShareInviteInvitationIdRoute = ShareInviteInvitationIdRouteImport.update({
   id: '/share/invite/$invitationId',
   path: '/share/invite/$invitationId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const TeamInviteInvitationIdRoute = TeamInviteInvitationIdRouteImport.update({
-  id: '/team/invite/$invitationId',
-  path: '/team/invite/$invitationId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiWebhooksSlackInteractiveRoute =
@@ -309,42 +295,6 @@ const ApiOgBlogSlugRoute = ApiOgBlogSlugRouteImport.update({
   path: '/api/og/blog/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAdminMediaUploadRoute = ApiAdminMediaUploadRouteImport.update({
-  id: '/api/admin/media/upload',
-  path: '/api/admin/media/upload',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAdminMediaRegisterRoute = ApiAdminMediaRegisterRouteImport.update({
-  id: '/api/admin/media/register',
-  path: '/api/admin/media/register',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAdminMediaMoveRoute = ApiAdminMediaMoveRouteImport.update({
-  id: '/api/admin/media/move',
-  path: '/api/admin/media/move',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAdminMediaListRoute = ApiAdminMediaListRouteImport.update({
-  id: '/api/admin/media/list',
-  path: '/api/admin/media/list',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAdminMediaDownloadRoute = ApiAdminMediaDownloadRouteImport.update({
-  id: '/api/admin/media/download',
-  path: '/api/admin/media/download',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAdminMediaDeleteRoute = ApiAdminMediaDeleteRouteImport.update({
-  id: '/api/admin/media/delete',
-  path: '/api/admin/media/delete',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAdminMediaCreateFolderRoute =
-  ApiAdminMediaCreateFolderRouteImport.update({
-    id: '/api/admin/media/create-folder',
-    path: '/api/admin/media/create-folder',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const ApiAdminKanbanUpdateRoute = ApiAdminKanbanUpdateRouteImport.update({
   id: '/api/admin/kanban/update',
   path: '/api/admin/kanban/update',
@@ -434,11 +384,6 @@ const ApiAdminContentAuditRoute = ApiAdminContentAuditRouteImport.update({
   path: '/api/admin/content/audit',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAdminBlogUploadImageRoute = ApiAdminBlogUploadImageRouteImport.update({
-  id: '/api/admin/blog/upload-image',
-  path: '/api/admin/blog/upload-image',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiOgShareTLinkIdRoute = ApiOgShareTLinkIdRouteImport.update({
   id: '/api/og/share/t/$linkId',
   path: '/api/og/share/t/$linkId',
@@ -466,7 +411,6 @@ export interface FileRoutesByFullPath {
   '/terms': typeof TermsRoute
   '/update-password': typeof UpdatePasswordRoute
   '/app': typeof ViewAppRouteRouteWithChildren
-  '/api/media-upload': typeof ApiMediaUploadRoute
   '/api/shortcuts': typeof ApiShortcutsRoute
   '/api/templates': typeof ApiTemplatesRoute
   '/blog/$slug': typeof BlogSlugRoute
@@ -495,12 +439,11 @@ export interface FileRoutesByFullPath {
   '/api/tweet/$id': typeof ApiTweetIdRoute
   '/api/webhooks/slack-interactive': typeof ApiWebhooksSlackInteractiveRoute
   '/share/invite/$invitationId': typeof ShareInviteInvitationIdRoute
-  '/team/invite/$invitationId': typeof TeamInviteInvitationIdRoute
   '/share/link/$shareId': typeof ShareLinkShareIdRoute
   '/share/public/$publicSlug': typeof SharePublicPublicSlugRoute
+  '/team/invite/$invitationId': typeof TeamInviteInvitationIdRoute
   '/app/': typeof ViewAppIndexRoute
   '/download/': typeof ViewDownloadIndexRoute
-  '/api/admin/blog/upload-image': typeof ApiAdminBlogUploadImageRoute
   '/api/admin/content/audit': typeof ApiAdminContentAuditRoute
   '/api/admin/content/create': typeof ApiAdminContentCreateRoute
   '/api/admin/content/delete': typeof ApiAdminContentDeleteRoute
@@ -518,13 +461,6 @@ export interface FileRoutesByFullPath {
   '/api/admin/kanban/items': typeof ApiAdminKanbanItemsRoute
   '/api/admin/kanban/projects': typeof ApiAdminKanbanProjectsRoute
   '/api/admin/kanban/update': typeof ApiAdminKanbanUpdateRoute
-  '/api/admin/media/create-folder': typeof ApiAdminMediaCreateFolderRoute
-  '/api/admin/media/delete': typeof ApiAdminMediaDeleteRoute
-  '/api/admin/media/download': typeof ApiAdminMediaDownloadRoute
-  '/api/admin/media/list': typeof ApiAdminMediaListRoute
-  '/api/admin/media/move': typeof ApiAdminMediaMoveRoute
-  '/api/admin/media/register': typeof ApiAdminMediaRegisterRoute
-  '/api/admin/media/upload': typeof ApiAdminMediaUploadRoute
   '/api/og/blog/$slug': typeof ApiOgBlogSlugRoute
   '/api/og/share/link/$shareId': typeof ApiOgShareLinkShareIdRoute
   '/api/og/share/public/$publicSlug': typeof ApiOgSharePublicPublicSlugRoute
@@ -539,7 +475,6 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/terms': typeof TermsRoute
   '/update-password': typeof UpdatePasswordRoute
-  '/api/media-upload': typeof ApiMediaUploadRoute
   '/api/shortcuts': typeof ApiShortcutsRoute
   '/api/templates': typeof ApiTemplatesRoute
   '/blog/$slug': typeof BlogSlugRoute
@@ -568,12 +503,11 @@ export interface FileRoutesByTo {
   '/api/tweet/$id': typeof ApiTweetIdRoute
   '/api/webhooks/slack-interactive': typeof ApiWebhooksSlackInteractiveRoute
   '/share/invite/$invitationId': typeof ShareInviteInvitationIdRoute
-  '/team/invite/$invitationId': typeof TeamInviteInvitationIdRoute
   '/share/link/$shareId': typeof ShareLinkShareIdRoute
   '/share/public/$publicSlug': typeof SharePublicPublicSlugRoute
+  '/team/invite/$invitationId': typeof TeamInviteInvitationIdRoute
   '/app': typeof ViewAppIndexRoute
   '/download': typeof ViewDownloadIndexRoute
-  '/api/admin/blog/upload-image': typeof ApiAdminBlogUploadImageRoute
   '/api/admin/content/audit': typeof ApiAdminContentAuditRoute
   '/api/admin/content/create': typeof ApiAdminContentCreateRoute
   '/api/admin/content/delete': typeof ApiAdminContentDeleteRoute
@@ -591,13 +525,6 @@ export interface FileRoutesByTo {
   '/api/admin/kanban/items': typeof ApiAdminKanbanItemsRoute
   '/api/admin/kanban/projects': typeof ApiAdminKanbanProjectsRoute
   '/api/admin/kanban/update': typeof ApiAdminKanbanUpdateRoute
-  '/api/admin/media/create-folder': typeof ApiAdminMediaCreateFolderRoute
-  '/api/admin/media/delete': typeof ApiAdminMediaDeleteRoute
-  '/api/admin/media/download': typeof ApiAdminMediaDownloadRoute
-  '/api/admin/media/list': typeof ApiAdminMediaListRoute
-  '/api/admin/media/move': typeof ApiAdminMediaMoveRoute
-  '/api/admin/media/register': typeof ApiAdminMediaRegisterRoute
-  '/api/admin/media/upload': typeof ApiAdminMediaUploadRoute
   '/api/og/blog/$slug': typeof ApiOgBlogSlugRoute
   '/api/og/share/link/$shareId': typeof ApiOgShareLinkShareIdRoute
   '/api/og/share/public/$publicSlug': typeof ApiOgSharePublicPublicSlugRoute
@@ -615,7 +542,6 @@ export interface FileRoutesById {
   '/terms': typeof TermsRoute
   '/update-password': typeof UpdatePasswordRoute
   '/_view/app': typeof ViewAppRouteRouteWithChildren
-  '/api/media-upload': typeof ApiMediaUploadRoute
   '/api/shortcuts': typeof ApiShortcutsRoute
   '/api/templates': typeof ApiTemplatesRoute
   '/blog/$slug': typeof BlogSlugRoute
@@ -644,12 +570,11 @@ export interface FileRoutesById {
   '/api/tweet/$id': typeof ApiTweetIdRoute
   '/api/webhooks/slack-interactive': typeof ApiWebhooksSlackInteractiveRoute
   '/share/invite/$invitationId': typeof ShareInviteInvitationIdRoute
-  '/team/invite/$invitationId': typeof TeamInviteInvitationIdRoute
   '/share/link/$shareId': typeof ShareLinkShareIdRoute
   '/share/public/$publicSlug': typeof SharePublicPublicSlugRoute
+  '/team/invite/$invitationId': typeof TeamInviteInvitationIdRoute
   '/_view/app/': typeof ViewAppIndexRoute
   '/_view/download/': typeof ViewDownloadIndexRoute
-  '/api/admin/blog/upload-image': typeof ApiAdminBlogUploadImageRoute
   '/api/admin/content/audit': typeof ApiAdminContentAuditRoute
   '/api/admin/content/create': typeof ApiAdminContentCreateRoute
   '/api/admin/content/delete': typeof ApiAdminContentDeleteRoute
@@ -667,13 +592,6 @@ export interface FileRoutesById {
   '/api/admin/kanban/items': typeof ApiAdminKanbanItemsRoute
   '/api/admin/kanban/projects': typeof ApiAdminKanbanProjectsRoute
   '/api/admin/kanban/update': typeof ApiAdminKanbanUpdateRoute
-  '/api/admin/media/create-folder': typeof ApiAdminMediaCreateFolderRoute
-  '/api/admin/media/delete': typeof ApiAdminMediaDeleteRoute
-  '/api/admin/media/download': typeof ApiAdminMediaDownloadRoute
-  '/api/admin/media/list': typeof ApiAdminMediaListRoute
-  '/api/admin/media/move': typeof ApiAdminMediaMoveRoute
-  '/api/admin/media/register': typeof ApiAdminMediaRegisterRoute
-  '/api/admin/media/upload': typeof ApiAdminMediaUploadRoute
   '/api/og/blog/$slug': typeof ApiOgBlogSlugRoute
   '/api/og/share/link/$shareId': typeof ApiOgShareLinkShareIdRoute
   '/api/og/share/public/$publicSlug': typeof ApiOgSharePublicPublicSlugRoute
@@ -691,7 +609,6 @@ export interface FileRouteTypes {
     | '/terms'
     | '/update-password'
     | '/app'
-    | '/api/media-upload'
     | '/api/shortcuts'
     | '/api/templates'
     | '/blog/$slug'
@@ -720,12 +637,11 @@ export interface FileRouteTypes {
     | '/api/tweet/$id'
     | '/api/webhooks/slack-interactive'
     | '/share/invite/$invitationId'
-    | '/team/invite/$invitationId'
     | '/share/link/$shareId'
     | '/share/public/$publicSlug'
+    | '/team/invite/$invitationId'
     | '/app/'
     | '/download/'
-    | '/api/admin/blog/upload-image'
     | '/api/admin/content/audit'
     | '/api/admin/content/create'
     | '/api/admin/content/delete'
@@ -743,13 +659,6 @@ export interface FileRouteTypes {
     | '/api/admin/kanban/items'
     | '/api/admin/kanban/projects'
     | '/api/admin/kanban/update'
-    | '/api/admin/media/create-folder'
-    | '/api/admin/media/delete'
-    | '/api/admin/media/download'
-    | '/api/admin/media/list'
-    | '/api/admin/media/move'
-    | '/api/admin/media/register'
-    | '/api/admin/media/upload'
     | '/api/og/blog/$slug'
     | '/api/og/share/link/$shareId'
     | '/api/og/share/public/$publicSlug'
@@ -764,7 +673,6 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/terms'
     | '/update-password'
-    | '/api/media-upload'
     | '/api/shortcuts'
     | '/api/templates'
     | '/blog/$slug'
@@ -793,12 +701,11 @@ export interface FileRouteTypes {
     | '/api/tweet/$id'
     | '/api/webhooks/slack-interactive'
     | '/share/invite/$invitationId'
-    | '/team/invite/$invitationId'
     | '/share/link/$shareId'
     | '/share/public/$publicSlug'
+    | '/team/invite/$invitationId'
     | '/app'
     | '/download'
-    | '/api/admin/blog/upload-image'
     | '/api/admin/content/audit'
     | '/api/admin/content/create'
     | '/api/admin/content/delete'
@@ -816,13 +723,6 @@ export interface FileRouteTypes {
     | '/api/admin/kanban/items'
     | '/api/admin/kanban/projects'
     | '/api/admin/kanban/update'
-    | '/api/admin/media/create-folder'
-    | '/api/admin/media/delete'
-    | '/api/admin/media/download'
-    | '/api/admin/media/list'
-    | '/api/admin/media/move'
-    | '/api/admin/media/register'
-    | '/api/admin/media/upload'
     | '/api/og/blog/$slug'
     | '/api/og/share/link/$shareId'
     | '/api/og/share/public/$publicSlug'
@@ -839,7 +739,6 @@ export interface FileRouteTypes {
     | '/terms'
     | '/update-password'
     | '/_view/app'
-    | '/api/media-upload'
     | '/api/shortcuts'
     | '/api/templates'
     | '/blog/$slug'
@@ -868,12 +767,11 @@ export interface FileRouteTypes {
     | '/api/tweet/$id'
     | '/api/webhooks/slack-interactive'
     | '/share/invite/$invitationId'
-    | '/team/invite/$invitationId'
     | '/share/link/$shareId'
     | '/share/public/$publicSlug'
+    | '/team/invite/$invitationId'
     | '/_view/app/'
     | '/_view/download/'
-    | '/api/admin/blog/upload-image'
     | '/api/admin/content/audit'
     | '/api/admin/content/create'
     | '/api/admin/content/delete'
@@ -891,13 +789,6 @@ export interface FileRouteTypes {
     | '/api/admin/kanban/items'
     | '/api/admin/kanban/projects'
     | '/api/admin/kanban/update'
-    | '/api/admin/media/create-folder'
-    | '/api/admin/media/delete'
-    | '/api/admin/media/download'
-    | '/api/admin/media/list'
-    | '/api/admin/media/move'
-    | '/api/admin/media/register'
-    | '/api/admin/media/upload'
     | '/api/og/blog/$slug'
     | '/api/og/share/link/$shareId'
     | '/api/og/share/public/$publicSlug'
@@ -914,7 +805,6 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   TermsRoute: typeof TermsRoute
   UpdatePasswordRoute: typeof UpdatePasswordRoute
-  ApiMediaUploadRoute: typeof ApiMediaUploadRoute
   ApiShortcutsRoute: typeof ApiShortcutsRoute
   ApiTemplatesRoute: typeof ApiTemplatesRoute
   BlogSlugRoute: typeof BlogSlugRoute
@@ -931,10 +821,9 @@ export interface RootRouteChildren {
   ApiTweetIdRoute: typeof ApiTweetIdRoute
   ApiWebhooksSlackInteractiveRoute: typeof ApiWebhooksSlackInteractiveRoute
   ShareInviteInvitationIdRoute: typeof ShareInviteInvitationIdRoute
-  TeamInviteInvitationIdRoute: typeof TeamInviteInvitationIdRoute
   ShareLinkShareIdRoute: typeof ShareLinkShareIdRoute
   SharePublicPublicSlugRoute: typeof SharePublicPublicSlugRoute
-  ApiAdminBlogUploadImageRoute: typeof ApiAdminBlogUploadImageRoute
+  TeamInviteInvitationIdRoute: typeof TeamInviteInvitationIdRoute
   ApiAdminContentAuditRoute: typeof ApiAdminContentAuditRoute
   ApiAdminContentCreateRoute: typeof ApiAdminContentCreateRoute
   ApiAdminContentDeleteRoute: typeof ApiAdminContentDeleteRoute
@@ -952,13 +841,6 @@ export interface RootRouteChildren {
   ApiAdminKanbanItemsRoute: typeof ApiAdminKanbanItemsRoute
   ApiAdminKanbanProjectsRoute: typeof ApiAdminKanbanProjectsRoute
   ApiAdminKanbanUpdateRoute: typeof ApiAdminKanbanUpdateRoute
-  ApiAdminMediaCreateFolderRoute: typeof ApiAdminMediaCreateFolderRoute
-  ApiAdminMediaDeleteRoute: typeof ApiAdminMediaDeleteRoute
-  ApiAdminMediaDownloadRoute: typeof ApiAdminMediaDownloadRoute
-  ApiAdminMediaListRoute: typeof ApiAdminMediaListRoute
-  ApiAdminMediaMoveRoute: typeof ApiAdminMediaMoveRoute
-  ApiAdminMediaRegisterRoute: typeof ApiAdminMediaRegisterRoute
-  ApiAdminMediaUploadRoute: typeof ApiAdminMediaUploadRoute
   ApiOgBlogSlugRoute: typeof ApiOgBlogSlugRoute
   ApiOgShareLinkShareIdRoute: typeof ApiOgShareLinkShareIdRoute
   ApiOgSharePublicPublicSlugRoute: typeof ApiOgSharePublicPublicSlugRoute
@@ -1114,13 +996,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiShortcutsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/media-upload': {
-      id: '/api/media-upload'
-      path: '/api/media-upload'
-      fullPath: '/api/media-upload'
-      preLoaderRoute: typeof ApiMediaUploadRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_view/app': {
       id: '/_view/app'
       path: '/app'
@@ -1142,6 +1017,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ViewAppIndexRouteImport
       parentRoute: typeof ViewAppRouteRoute
     }
+    '/team/invite/$invitationId': {
+      id: '/team/invite/$invitationId'
+      path: '/team/invite/$invitationId'
+      fullPath: '/team/invite/$invitationId'
+      preLoaderRoute: typeof TeamInviteInvitationIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/share/public/$publicSlug': {
       id: '/share/public/$publicSlug'
       path: '/share/public/$publicSlug'
@@ -1161,13 +1043,6 @@ declare module '@tanstack/react-router' {
       path: '/share/invite/$invitationId'
       fullPath: '/share/invite/$invitationId'
       preLoaderRoute: typeof ShareInviteInvitationIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/team/invite/$invitationId': {
-      id: '/team/invite/$invitationId'
-      path: '/team/invite/$invitationId'
-      fullPath: '/team/invite/$invitationId'
-      preLoaderRoute: typeof TeamInviteInvitationIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/webhooks/slack-interactive': {
@@ -1280,55 +1155,6 @@ declare module '@tanstack/react-router' {
       path: '/api/og/blog/$slug'
       fullPath: '/api/og/blog/$slug'
       preLoaderRoute: typeof ApiOgBlogSlugRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/admin/media/upload': {
-      id: '/api/admin/media/upload'
-      path: '/api/admin/media/upload'
-      fullPath: '/api/admin/media/upload'
-      preLoaderRoute: typeof ApiAdminMediaUploadRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/admin/media/register': {
-      id: '/api/admin/media/register'
-      path: '/api/admin/media/register'
-      fullPath: '/api/admin/media/register'
-      preLoaderRoute: typeof ApiAdminMediaRegisterRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/admin/media/move': {
-      id: '/api/admin/media/move'
-      path: '/api/admin/media/move'
-      fullPath: '/api/admin/media/move'
-      preLoaderRoute: typeof ApiAdminMediaMoveRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/admin/media/list': {
-      id: '/api/admin/media/list'
-      path: '/api/admin/media/list'
-      fullPath: '/api/admin/media/list'
-      preLoaderRoute: typeof ApiAdminMediaListRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/admin/media/download': {
-      id: '/api/admin/media/download'
-      path: '/api/admin/media/download'
-      fullPath: '/api/admin/media/download'
-      preLoaderRoute: typeof ApiAdminMediaDownloadRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/admin/media/delete': {
-      id: '/api/admin/media/delete'
-      path: '/api/admin/media/delete'
-      fullPath: '/api/admin/media/delete'
-      preLoaderRoute: typeof ApiAdminMediaDeleteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/admin/media/create-folder': {
-      id: '/api/admin/media/create-folder'
-      path: '/api/admin/media/create-folder'
-      fullPath: '/api/admin/media/create-folder'
-      preLoaderRoute: typeof ApiAdminMediaCreateFolderRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/admin/kanban/update': {
@@ -1450,13 +1276,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAdminContentAuditRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/admin/blog/upload-image': {
-      id: '/api/admin/blog/upload-image'
-      path: '/api/admin/blog/upload-image'
-      fullPath: '/api/admin/blog/upload-image'
-      preLoaderRoute: typeof ApiAdminBlogUploadImageRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/og/share/t/$linkId': {
       id: '/api/og/share/t/$linkId'
       path: '/api/og/share/t/$linkId'
@@ -1541,7 +1360,6 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   TermsRoute: TermsRoute,
   UpdatePasswordRoute: UpdatePasswordRoute,
-  ApiMediaUploadRoute: ApiMediaUploadRoute,
   ApiShortcutsRoute: ApiShortcutsRoute,
   ApiTemplatesRoute: ApiTemplatesRoute,
   BlogSlugRoute: BlogSlugRoute,
@@ -1558,10 +1376,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTweetIdRoute: ApiTweetIdRoute,
   ApiWebhooksSlackInteractiveRoute: ApiWebhooksSlackInteractiveRoute,
   ShareInviteInvitationIdRoute: ShareInviteInvitationIdRoute,
-  TeamInviteInvitationIdRoute: TeamInviteInvitationIdRoute,
   ShareLinkShareIdRoute: ShareLinkShareIdRoute,
   SharePublicPublicSlugRoute: SharePublicPublicSlugRoute,
-  ApiAdminBlogUploadImageRoute: ApiAdminBlogUploadImageRoute,
+  TeamInviteInvitationIdRoute: TeamInviteInvitationIdRoute,
   ApiAdminContentAuditRoute: ApiAdminContentAuditRoute,
   ApiAdminContentCreateRoute: ApiAdminContentCreateRoute,
   ApiAdminContentDeleteRoute: ApiAdminContentDeleteRoute,
@@ -1579,13 +1396,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAdminKanbanItemsRoute: ApiAdminKanbanItemsRoute,
   ApiAdminKanbanProjectsRoute: ApiAdminKanbanProjectsRoute,
   ApiAdminKanbanUpdateRoute: ApiAdminKanbanUpdateRoute,
-  ApiAdminMediaCreateFolderRoute: ApiAdminMediaCreateFolderRoute,
-  ApiAdminMediaDeleteRoute: ApiAdminMediaDeleteRoute,
-  ApiAdminMediaDownloadRoute: ApiAdminMediaDownloadRoute,
-  ApiAdminMediaListRoute: ApiAdminMediaListRoute,
-  ApiAdminMediaMoveRoute: ApiAdminMediaMoveRoute,
-  ApiAdminMediaRegisterRoute: ApiAdminMediaRegisterRoute,
-  ApiAdminMediaUploadRoute: ApiAdminMediaUploadRoute,
   ApiOgBlogSlugRoute: ApiOgBlogSlugRoute,
   ApiOgShareLinkShareIdRoute: ApiOgShareLinkShareIdRoute,
   ApiOgSharePublicPublicSlugRoute: ApiOgSharePublicPublicSlugRoute,

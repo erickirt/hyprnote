@@ -1,10 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-const STORAGE_BUCKETS = {
-  public_images:
-    "https://auth.hyprnote.com/storage/v1/object/public/public_images",
-  blog: "https://auth.hyprnote.com/storage/v1/object/public/blog",
-} as const;
+const PUBLIC_IMAGES_BASE_URL =
+  "https://auth.hyprnote.com/storage/v1/object/public/public_images";
 
 const SAFE_SEGMENT = /^[A-Za-z0-9._+\- ]+$/;
 
@@ -54,36 +51,36 @@ function encodePath(segments: string[]) {
   return segments.map((segment) => encodeURIComponent(segment)).join("/");
 }
 
-function getStorageUrl(segments: string[]): string | null {
-  const [bucket, ...pathSegments] = segments;
-
-  if (bucket === "blog") {
-    if (pathSegments.length === 0) {
-      return null;
-    }
-
-    return `${STORAGE_BUCKETS.blog}/${encodePath(pathSegments)}`;
-  }
-
-  return `${STORAGE_BUCKETS.public_images}/${encodePath(segments)}`;
+function getPublicImagesUrl(segments: string[]) {
+  return `${PUBLIC_IMAGES_BASE_URL}/${encodePath(segments)}`;
 }
 
 export const Route = createFileRoute("/api/assets/$")({
   server: {
     handlers: {
-      GET: async ({ params }) => {
+      GET: async ({ params, request }) => {
         const sanitizedPath = sanitizePath(params._splat);
 
         if (!sanitizedPath) {
           return new Response("Not found", { status: 404 });
         }
 
-        const url = getStorageUrl(sanitizedPath);
-        if (!url) {
-          return new Response("Not found", { status: 404 });
+        // Netlify redirects this at the edge in production. Keep the app-level
+        // redirect for local development and non-Netlify deployments.
+        const [namespace, ...pathSegments] = sanitizedPath;
+        if (namespace === "blog") {
+          if (pathSegments.length === 0) {
+            return new Response("Not found", { status: 404 });
+          }
+
+          const location = new URL(
+            `/images/blog/${encodePath(pathSegments)}`,
+            request.url,
+          );
+          return Response.redirect(location, 301);
         }
 
-        const response = await fetch(url);
+        const response = await fetch(getPublicImagesUrl(sanitizedPath));
 
         if (!response.ok) {
           if (response.status === 404) {

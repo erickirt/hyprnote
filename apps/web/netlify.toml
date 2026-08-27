@@ -25,6 +25,19 @@ remote_images = [
   "https://ijoptyyjrfqwaqhyxkxj\\.supabase\\.co/.*",
 ]
 
+[[headers]]
+for = "/images/blog/*"
+[headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+X-Content-Type-Options = "nosniff"
+
+# Preserve old indexed image URLs without keeping the Supabase blog bucket.
+[[redirects]]
+from = "/api/assets/blog/*"
+to = "/images/blog/:splat"
+status = 301
+force = true
+
 # Keep APT metadata on anarlog.so while immutable package binaries stay on the
 # matching GitHub release. The release segment is preserved end-to-end.
 [[redirects]]

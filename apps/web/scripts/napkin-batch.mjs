@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,12 +8,8 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const webDir = resolve(scriptDir, "..");
 const ARTICLES_DIR = resolve(webDir, "content/articles");
 const MANIFEST_PATH = resolve(ARTICLES_DIR, "figures.json");
-const SINGLE_SCRIPT = resolve(scriptDir, "napkin-to-supabase.mjs");
-
-// Mirrors STORAGE_BUCKETS.blog in src/routes/api/assets.$.ts. Public, so the
-// existence check needs no credentials and is safe to run in CI.
-const PUBLIC_BLOG_BASE =
-  "https://auth.hyprnote.com/storage/v1/object/public/blog";
+const SINGLE_SCRIPT = resolve(scriptDir, "napkin-to-public.mjs");
+const PUBLIC_BLOG_DIR = resolve(webDir, "public/images/blog");
 
 function parseArgs(argv) {
   const args = {};
@@ -69,8 +65,7 @@ Declare figures in content/articles/figures.json:
 
 An empty array marks a post as deliberately figure-less and satisfies --check.
 
-Generation requires NAPKIN_API_TOKEN, SUPABASE_URL, and SUPABASE_SERVICE_ROLE_KEY;
-see napkin-to-supabase.md for the Infisical command.
+Generation requires NAPKIN_API_TOKEN; see napkin-to-public.md for the Infisical command.
 `;
 }
 
@@ -102,10 +97,9 @@ function storagePath(slug, filename) {
 }
 
 async function figureExists(slug, filename) {
-  const url = `${PUBLIC_BLOG_BASE}/${storagePath(slug, filename)}`;
   try {
-    const response = await fetch(url, { method: "HEAD" });
-    return response.ok;
+    await access(resolve(PUBLIC_BLOG_DIR, storagePath(slug, filename)));
+    return true;
   } catch {
     return false;
   }
@@ -151,7 +145,7 @@ function runSingle(slug, figure, { upsert, dryRun }) {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) resolvePromise();
-      else reject(new Error(`napkin-to-supabase exited with code ${code}`));
+      else reject(new Error(`napkin-to-public exited with code ${code}`));
     });
   });
 }
@@ -229,13 +223,13 @@ async function main() {
     }
     if (missing.length > 0) {
       console.error(
-        `\n${missing.length} declared figure(s) not yet uploaded${strict ? "" : " (warning)"}:`,
+        `\n${missing.length} declared figure(s) not yet generated${strict ? "" : " (warning)"}:`,
       );
       for (const { slug, figure } of missing) {
         console.error(`  - ${storagePath(slug, figure.filename)}`);
       }
       console.error(
-        "\nRun `pnpm -F @anlg/web media:figures` with Napkin and Supabase credentials.",
+        "\nRun `pnpm -F @anlg/web media:figures` with Napkin credentials.",
       );
     }
 
