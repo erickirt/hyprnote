@@ -1,8 +1,30 @@
-#[cfg(any(test, target_os = "macos"))]
-use std::collections::HashSet;
-
 #[cfg(target_os = "macos")]
 use cidre::{arc, ax, cf, cg};
+
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+unsafe extern "C-unwind" {
+    #[link_name = "AXUIElementCopyAttributeValue"]
+    fn ax_ui_element_copy_attribute_value_raw(
+        element: &ax::UiElement,
+        attribute: &ax::Attr,
+        value: *mut Option<arc::R<cf::Type>>,
+    ) -> i32;
+    #[link_name = "AXUIElementIsAttributeSettable"]
+    fn ax_ui_element_is_attribute_settable_raw(
+        element: &ax::UiElement,
+        attribute: &ax::Attr,
+        settable: *mut bool,
+    ) -> i32;
+    #[link_name = "AXUIElementPerformAction"]
+    fn ax_ui_element_perform_action_raw(element: &ax::UiElement, action: &ax::Action) -> i32;
+    #[link_name = "AXUIElementSetAttributeValue"]
+    fn ax_ui_element_set_attribute_value_raw(
+        element: &ax::UiElement,
+        attribute: &ax::Attr,
+        value: &cf::Type,
+    ) -> i32;
+}
 
 #[cfg(any(test, target_os = "macos", target_os = "linux"))]
 mod analysis;
@@ -19,15 +41,13 @@ mod types;
 #[cfg_attr(target_os = "linux", allow(unused_imports))]
 #[cfg(any(test, target_os = "macos", target_os = "linux"))]
 use analysis::{
-    candidate_chat_target, extract_chat_messages, find_participant_streams,
-    is_slack_huddle_scope_node, is_zoom_chat_scope_node, is_zoom_meeting_evidence,
-    is_zoom_meeting_scope_node,
+    candidate_chat_target, extract_chat_messages, is_slack_huddle_scope_node,
+    is_zoom_chat_scope_node, is_zoom_meeting_evidence, is_zoom_meeting_scope_node,
 };
 #[cfg(test)]
 use analysis::{
-    candidate_stream, extract_links, looks_like_time, meeting_chat_direction,
-    meeting_chat_surface_is_visible, parse_chat_message, participant_name_from_evidence,
-    slack_huddle_is_active,
+    extract_links, looks_like_time, meeting_chat_direction, meeting_chat_surface_is_visible,
+    parse_chat_message, slack_huddle_is_active,
 };
 #[cfg(target_os = "macos")]
 use context::zoom_chat_surface_is_visible;
@@ -36,7 +56,7 @@ use context::zoom_chat_surface_is_visible;
 use context::{
     browser_capture_context_id, is_open_meeting_chat_control, is_platform_chat_composer,
     is_platform_send_button, native_capture_context_id, path_is_ancestor, slack_capture_context_id,
-    validated_chat_scope, zoom_capture_context_id,
+    validated_chat_capture_scope, validated_chat_scope, zoom_capture_context_id,
 };
 #[cfg(test)]
 use node::node_text;
@@ -44,8 +64,10 @@ use node::node_text;
 #[cfg(any(test, target_os = "macos", target_os = "linux"))]
 use node::{
     is_platform_active_call_control, is_platform_meeting_control, node_has_positive_bounds,
-    node_labels, searchable_node_text,
+    node_labels, searchable_node_text, teams_has_active_call_evidence,
 };
+#[cfg(any(test, target_os = "linux"))]
+use platform::is_browser_active_call_control;
 #[cfg_attr(target_os = "linux", allow(unused_imports))]
 #[cfg(any(test, target_os = "macos", target_os = "linux"))]
 use platform::{
@@ -67,16 +89,14 @@ use types::{
 use types::{AxChatElement, SlackHuddleRoot};
 pub use types::{
     AxRect, MeetingAccessibilityInspection, MeetingApp, MeetingCapturedChatMessage,
-    MeetingChatCaptureResult, MeetingChatDirection, MeetingChatSendResult,
-    MeetingParticipantStream, MeetingPlatform, MeetingSurface,
+    MeetingChatCaptureResult, MeetingChatDirection, MeetingChatSendResult, MeetingPlatform,
+    MeetingSurface,
 };
 
 #[cfg(any(test, target_os = "macos", target_os = "linux"))]
-const MAX_TREE_DEPTH: usize = 18;
+const MAX_TREE_DEPTH: usize = 32;
 #[cfg(any(test, target_os = "macos", target_os = "linux"))]
-const MAX_NODES: usize = 1800;
-#[cfg(any(test, target_os = "macos", target_os = "linux"))]
-const MIN_VIDEO_AREA: f64 = 18_000.0;
+const MAX_NODES: usize = 4000;
 #[cfg(any(test, target_os = "macos", target_os = "linux"))]
 const MAX_MEETING_CHAT_MESSAGE_CHARS: usize = 2_000;
 
@@ -98,6 +118,103 @@ fn unique_scope_for_search(count: usize, complete: bool) -> UniqueMatch {
     }
 }
 
+#[cfg(any(test, target_os = "macos", target_os = "linux"))]
+#[derive(Debug)]
+enum BrowserMeetingSnapshot {
+    Accept(BrowserMeetingRoot),
+    Exclude,
+    Unscoped,
+}
+
+#[cfg(any(test, target_os = "macos", target_os = "linux"))]
+fn is_chat_priority_label(label: &str) -> bool {
+    let label = label.trim().to_ascii_lowercase();
+    label.contains("in-call messages")
+        || label.contains("meeting chat")
+        || label.contains("send a message")
+        || label.contains("type a message")
+        || label.contains("type a new message")
+        || label.contains("type message here")
+        || label.contains("message everyone")
+        || label.contains("write a message")
+        || label.contains("chat message list")
+        || label.contains("chat with everyone")
+        || label.contains("huddle chat")
+        || label.contains("open chat")
+        || label.contains("open the chat panel")
+        || label.contains("close the chat panel")
+        || label.contains("show chat")
+        || label.contains("show/hide thread")
+        || label == "chat"
+        || label == "leave call"
+        || label == "hang up"
+        || label == "leave meeting"
+        || label == "end meeting"
+        || label == "leave huddle"
+        || label == "end huddle"
+}
+
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChildWalk {
+    Visible,
+    Children,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn select_child_walk(
+    children: Option<usize>,
+    visible: Option<usize>,
+    allow_visible_subset: bool,
+) -> Option<ChildWalk> {
+    let nonempty = |count: Option<usize>| count.filter(|&count| count > 0);
+    let visible = nonempty(visible);
+    let children = nonempty(children);
+
+    match (visible, children) {
+        (Some(visible_count), Some(children_count))
+            if allow_visible_subset && children_count > 64 && visible_count < children_count =>
+        {
+            Some(ChildWalk::Visible)
+        }
+        (_, Some(_)) => Some(ChildWalk::Children),
+        (Some(_), None) => Some(ChildWalk::Visible),
+        (None, None) => None,
+    }
+}
+
+#[cfg(any(test, target_os = "macos", target_os = "linux"))]
+fn browser_meeting_root_from_snapshot(
+    nodes: Vec<AxNode>,
+    complete: bool,
+    web_area_url: Option<String>,
+    window_title: Option<String>,
+    web_area_node: Option<&AxNode>,
+) -> BrowserMeetingSnapshot {
+    let platform = classify_browser_context(
+        web_area_url.as_deref(),
+        window_title.as_deref(),
+        web_area_node,
+        &nodes,
+    );
+    if platform == MeetingPlatform::Unknown {
+        return if !complete
+            && browser_window_has_provider_signal(web_area_url.as_deref(), window_title.as_deref())
+        {
+            BrowserMeetingSnapshot::Unscoped
+        } else {
+            BrowserMeetingSnapshot::Exclude
+        };
+    }
+
+    BrowserMeetingSnapshot::Accept(BrowserMeetingRoot {
+        platform,
+        window_title,
+        web_area_url,
+        nodes,
+    })
+}
+
 #[cfg(target_os = "macos")]
 pub fn inspect_meeting_accessibility() -> Vec<MeetingAccessibilityInspection> {
     let accessibility_trusted = macos_accessibility_client::accessibility::application_is_trusted();
@@ -115,6 +232,118 @@ pub fn inspect_meeting_accessibility() -> Vec<MeetingAccessibilityInspection> {
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn inspect_meeting_accessibility() -> Vec<MeetingAccessibilityInspection> {
     Vec::new()
+}
+
+#[cfg(target_os = "macos")]
+pub fn describe_browser_ax(pid: i32) -> Vec<String> {
+    let ax_app = ax::UiElement::with_app_pid(pid);
+    let _ = ax_app.set_messaging_timeout_secs(0.6);
+    let mut windows = Vec::new();
+    let mut visited = 0;
+    let complete = collect_window_elements(&ax_app, 0, &mut visited, &mut windows);
+    let focused = focused_web_area_element(&ax_app);
+    let mut hits = Vec::new();
+    let mut searched = 0;
+    let mut ancestors = Vec::new();
+    find_chat_priority_hits(&ax_app, 0, &mut searched, &mut ancestors, &mut hits);
+    let mut lines = vec![format!(
+        "windows={} discovery_complete={} focused_web_area={} chat_hits={} searched={}",
+        windows.len(),
+        complete,
+        focused.is_some(),
+        hits.len(),
+        searched
+    )];
+    lines.extend(hits.into_iter().take(12));
+    for (index, window) in windows.iter().enumerate() {
+        let title = string_attr(window, ax::attr::title());
+        let (web_area, web_complete) = active_web_area_element(window, focused.as_deref());
+        let url = web_area.as_ref().and_then(|area| url_attr(area));
+        let web_title = web_area
+            .as_ref()
+            .and_then(|area| string_attr(area, ax::attr::title()));
+        let children = web_area
+            .as_ref()
+            .and_then(|area| ax_element_array(area, ax::attr::children()))
+            .map(|array| array.len());
+        let visible = web_area
+            .as_ref()
+            .and_then(|area| ax_element_array(area, ax::attr::visible_children()))
+            .map(|array| array.len());
+        lines.push(format!(
+            "window[{index}] title={title:?} web_complete={web_complete} web_title={web_title:?} url={url:?} children={children:?} visible={visible:?}"
+        ));
+        let mut web_areas = Vec::new();
+        let mut visited_areas = 0;
+        let listed = collect_web_area_elements(window, 0, &mut visited_areas, &mut web_areas);
+        lines.push(format!(
+            "  web_areas={} list_complete={}",
+            web_areas.len(),
+            listed
+        ));
+        for (area_index, area) in web_areas.iter().enumerate() {
+            lines.push(format!(
+                "  web[{area_index}] title={:?} url={:?}",
+                string_attr(area, ax::attr::title()),
+                url_attr(area)
+            ));
+        }
+    }
+    lines
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn describe_browser_ax(_pid: i32) -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(target_os = "macos")]
+fn find_chat_priority_hits(
+    element: &ax::UiElement,
+    depth: usize,
+    visited: &mut usize,
+    ancestors: &mut Vec<String>,
+    hits: &mut Vec<String>,
+) {
+    if depth > MAX_TREE_DEPTH || *visited >= MAX_NODES || hits.len() >= 12 {
+        return;
+    }
+    *visited += 1;
+    let role = string_attr(element, ax::attr::role()).unwrap_or_default();
+    let role_description = string_attr(element, ax::attr::role_desc()).unwrap_or_default();
+    let title = string_attr(element, ax::attr::title()).unwrap_or_default();
+    let description = string_attr(element, ax::attr::desc()).unwrap_or_default();
+    let help = string_attr(element, ax::attr::help()).unwrap_or_default();
+    let placeholder = string_attr(element, ax::attr::placeholder_value()).unwrap_or_default();
+    if is_chat_priority_label(&title)
+        || is_chat_priority_label(&description)
+        || is_chat_priority_label(&help)
+        || is_chat_priority_label(&placeholder)
+        || matches!(role.as_str(), "AXTextArea" | "AXTextField")
+        || role_description.contains("text entry")
+    {
+        hits.push(format!(
+            "  hit d{depth} role={role:?} role_desc={role_description:?} title={title:?} desc={description:?} help={help:?} placeholder={placeholder:?} settable={} bounds={} path={}",
+            ax_is_settable(element, ax::attr::value()),
+            ax_frame(element).is_some(),
+            ancestors.join(" > ")
+        ));
+    }
+    let Some(children) = walkable_children(element, depth == 0) else {
+        return;
+    };
+    ancestors.push(if title.is_empty() {
+        role
+    } else {
+        format!("{role}:{title}")
+    });
+    for child in children.iter() {
+        find_chat_priority_hits(child, depth + 1, visited, ancestors, hits);
+        if hits.len() >= 12 {
+            break;
+        }
+    }
+    ancestors.pop();
 }
 
 #[cfg(any(test, target_os = "macos", target_os = "linux"))]
@@ -256,7 +485,8 @@ pub fn send_meeting_chat_message(
             continue;
         }
 
-        let mut roots = collect_native_meeting_windows(&ax_app, &scoped_platform, &mut warnings);
+        let mut roots =
+            collect_native_meeting_windows(&ax_app, &scoped_platform, true, &mut warnings);
         if roots.len() > 1 {
             warnings.push(format!(
                 "refusing to send because the meeting app exposed {} meeting windows",
@@ -413,7 +643,7 @@ fn collect_nodes_with_ancestors(
         labels: node_labels(&node).map(str::to_string).collect(),
     });
 
-    if let Ok(children) = element.children() {
+    if let Some(children) = walkable_children(element, depth == 0) {
         for (child_index, child) in children.iter().enumerate() {
             path.push(child_index);
             collect_nodes_with_ancestors(child, depth + 1, visited, path, ancestors, nodes);
@@ -472,7 +702,13 @@ pub fn capture_meeting_chat_messages(bundle_ids: Vec<String>) -> MeetingChatCapt
                 collect_browser_meeting_roots(&ax_app, &mut warnings);
             browser_scope_poisoned |= has_unscoped_meeting_window;
             browser_roots.extend(roots.into_iter().filter_map(|root| {
-                let context_id = browser_capture_context_id(&root)?;
+                let Some(context_id) = browser_capture_context_id(&root) else {
+                    warnings.push(format!(
+                        "a classified {:?} browser meeting root lacked one validated chat capture scope",
+                        root.platform,
+                    ));
+                    return None;
+                };
                 Some((app.clone(), root, context_id))
             }));
         }
@@ -635,7 +871,7 @@ fn send_slack_huddle_chat_message(
                 let label = inspection_label(&control.node)
                     .unwrap_or_else(|| "Slack Huddle thread control".to_string());
 
-                match control.element.perform_action(ax::action::press()) {
+                match ax_perform_action(&control.element, ax::action::press()) {
                     Ok(_) => {
                         warnings.push(format!("opened Slack Huddle thread via AX: {label}"));
                         (chat_elements, input_match) =
@@ -699,7 +935,7 @@ fn send_slack_huddle_chat_message(
     };
     let label = inspection_label(&input.node);
     let mut input_element = input.element.retained();
-    let _ = input_element.perform_action(ax::action::press());
+    let _ = ax_perform_action(&input_element, ax::action::press());
     let original_value = match chat_input_value(&input_element) {
         Ok(value) if value.trim().is_empty() => value,
         Ok(_) => {
@@ -715,7 +951,11 @@ fn send_slack_huddle_chat_message(
     };
 
     let message_value = cf::String::from_str(message);
-    if let Err(error) = input_element.set_attr(ax::attr::value(), message_value.as_type_ref()) {
+    if let Err(error) = ax_set_attr(
+        &input_element,
+        ax::attr::value(),
+        message_value.as_type_ref(),
+    ) {
         restore_chat_input_if_owned(&mut input_element, message, &original_value, &mut warnings);
         warnings.push(format!(
             "failed to set Slack Huddle composer value: {error:?}"
@@ -779,7 +1019,7 @@ fn send_slack_huddle_chat_message(
     }
 
     let button = &refreshed_elements[button_index];
-    match button.element.perform_action(ax::action::press()) {
+    match ax_perform_action(&button.element, ax::action::press()) {
         Ok(_) => MeetingChatSendResult {
             sent: true,
             app: Some(app.clone()),
@@ -826,7 +1066,7 @@ fn send_scoped_chat_message(
                 let control = &chat_elements[control_index];
                 let label = inspection_label(&control.node)
                     .unwrap_or_else(|| "meeting chat control".to_string());
-                match control.element.perform_action(ax::action::press()) {
+                match ax_perform_action(&control.element, ax::action::press()) {
                     Ok(_) => {
                         warnings.push(format!("opened meeting chat via AX: {label}"));
                         refreshed_nodes.clear();
@@ -877,7 +1117,7 @@ fn send_scoped_chat_message(
     let input = &chat_elements[input_index];
     let label = inspection_label(&input.node);
     let mut input_element = input.element.retained();
-    let _ = input_element.perform_action(ax::action::press());
+    let _ = ax_perform_action(&input_element, ax::action::press());
     let original_value = match chat_input_value(&input_element) {
         Ok(value) if value.trim().is_empty() => value,
         Ok(_) => {
@@ -893,7 +1133,11 @@ fn send_scoped_chat_message(
     };
 
     let message_value = cf::String::from_str(message);
-    if let Err(error) = input_element.set_attr(ax::attr::value(), message_value.as_type_ref()) {
+    if let Err(error) = ax_set_attr(
+        &input_element,
+        ax::attr::value(),
+        message_value.as_type_ref(),
+    ) {
         restore_chat_input_if_owned(&mut input_element, message, &original_value, &mut warnings);
         warnings.push(format!(
             "failed to set meeting chat composer value: {error:?}"
@@ -951,7 +1195,7 @@ fn send_scoped_chat_message(
     }
 
     let button = &refreshed_elements[button_index];
-    match button.element.perform_action(ax::action::press()) {
+    match ax_perform_action(&button.element, ax::action::press()) {
         Ok(_) => MeetingChatSendResult {
             sent: true,
             app: Some(app.clone()),
@@ -1007,9 +1251,8 @@ fn chat_send_failure(
 
 #[cfg(target_os = "macos")]
 fn chat_input_value(input: &ax::UiElement) -> Result<String, String> {
-    let value = input
-        .attr_value(ax::attr::value())
-        .map_err(|error| format!("{error:?}"))?;
+    let value = ax_attr_value(input, ax::attr::value())
+        .map_err(|status| format!("AXUIElementCopyAttributeValue failed with {status}"))?;
     value
         .try_as_string()
         .map(|value| value.to_string())
@@ -1026,7 +1269,7 @@ fn restore_chat_input_if_owned(
     match chat_input_value(input) {
         Ok(current) if chat_input_is_owned(&current, injected_message) => {
             let original = cf::String::from_str(original_value);
-            if let Err(error) = input.set_attr(ax::attr::value(), original.as_type_ref()) {
+            if let Err(error) = ax_set_attr(input, ax::attr::value(), original.as_type_ref()) {
                 warnings.push(format!(
                     "failed to restore the unsent meeting chat composer: {error:?}"
                 ));
@@ -1078,7 +1321,7 @@ fn collect_native_meeting_roots(
     platform: &MeetingPlatform,
     warnings: &mut Vec<String>,
 ) -> Vec<NativeMeetingRoot> {
-    collect_native_meeting_windows(ax_app, platform, warnings)
+    collect_native_meeting_windows(ax_app, platform, false, warnings)
         .into_iter()
         .map(|(root, _)| root)
         .collect()
@@ -1088,6 +1331,7 @@ fn collect_native_meeting_roots(
 fn collect_native_meeting_windows(
     ax_app: &ax::UiElement,
     platform: &MeetingPlatform,
+    require_complete: bool,
     warnings: &mut Vec<String>,
 ) -> Vec<(NativeMeetingRoot, arc::R<ax::UiElement>)> {
     let mut windows = Vec::new();
@@ -1103,28 +1347,64 @@ fn collect_native_meeting_windows(
         .filter_map(|element| {
             let window_title = string_attr(&element, ax::attr::title());
             let mut nodes = Vec::new();
-            if !collect_nodes(&element, 0, &mut nodes, warnings) {
-                return None;
-            }
-            native_meeting_window_is_validated(platform, &nodes).then_some((
-                NativeMeetingRoot {
-                    window_title,
-                    nodes,
-                },
-                element,
-            ))
+            let complete = collect_nodes(&element, 0, &mut nodes, warnings);
+            native_meeting_root_from_snapshot(
+                platform,
+                window_title,
+                nodes,
+                complete,
+                require_complete,
+            )
+            .map(|root| (root, element))
         })
         .collect()
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn native_meeting_root_from_snapshot(
+    platform: &MeetingPlatform,
+    window_title: Option<String>,
+    nodes: Vec<AxNode>,
+    complete: bool,
+    require_complete: bool,
+) -> Option<NativeMeetingRoot> {
+    if (*platform == MeetingPlatform::Webex
+        && window_title.as_deref().is_some_and(|title| {
+            title
+                .trim()
+                .eq_ignore_ascii_case("Webex multitasking floating window")
+        }))
+        || (require_complete && !complete)
+    {
+        return None;
+    }
+
+    native_meeting_window_is_validated(platform, &nodes).then_some(NativeMeetingRoot {
+        window_title,
+        nodes,
+    })
 }
 
 #[cfg(any(test, target_os = "macos", target_os = "linux"))]
 fn native_meeting_window_is_validated(platform: &MeetingPlatform, nodes: &[AxNode]) -> bool {
     match platform {
-        MeetingPlatform::Zoom => nodes.iter().any(is_zoom_meeting_evidence),
+        MeetingPlatform::Zoom => {
+            nodes.iter().any(is_zoom_meeting_evidence)
+                || (nodes.iter().any(is_zoom_meeting_scope_node)
+                    && nodes
+                        .iter()
+                        .any(|node| is_platform_active_call_control(platform, node)))
+        }
         MeetingPlatform::Discord => nodes.iter().any(|node| {
             node_labels(node).any(|label| label.trim().eq_ignore_ascii_case("voice connected"))
         }),
-        MeetingPlatform::MicrosoftTeams | MeetingPlatform::Webex => nodes
+        MeetingPlatform::MicrosoftTeams => {
+            nodes
+                .iter()
+                .any(|node| is_platform_active_call_control(platform, node))
+                || teams_has_active_call_evidence(nodes)
+        }
+        MeetingPlatform::Webex => nodes
             .iter()
             .any(|node| is_platform_active_call_control(platform, node)),
         MeetingPlatform::GoogleMeet | MeetingPlatform::Unknown => false,
@@ -1197,45 +1477,36 @@ fn collect_browser_meeting_windows(
             });
             let mut nodes = Vec::new();
             let mut root_warnings = Vec::new();
-            if !collect_nodes(&web_area, 0, &mut nodes, &mut root_warnings) {
-                if browser_window_has_provider_signal(
-                    web_area_url.as_deref(),
-                    window_title.as_deref(),
-                ) {
+            let complete = collect_nodes(&window, 0, &mut nodes, &mut root_warnings);
+            match browser_meeting_root_from_snapshot(
+                nodes,
+                complete,
+                web_area_url.clone(),
+                window_title.clone(),
+                Some(&web_area_node),
+            ) {
+                BrowserMeetingSnapshot::Accept(root) => {
+                    warnings.extend(root_warnings);
+                    Some((root, window))
+                }
+                BrowserMeetingSnapshot::Unscoped => {
                     has_unscoped_meeting_window = true;
                     warnings.extend(root_warnings);
+                    None
                 }
-                return None;
-            }
-            warnings.extend(root_warnings);
-            let platform = classify_browser_context(
-                web_area_url.as_deref(),
-                window_title.as_deref(),
-                Some(&web_area_node),
-                &nodes,
-            );
-            if platform == MeetingPlatform::Unknown {
-                if browser_window_has_provider_signal(
-                    web_area_url.as_deref(),
-                    window_title.as_deref(),
-                ) {
-                    warnings.push(
-                        "a browser window lacked matching meeting-origin and title/control signals; it was excluded"
-                            .to_string(),
-                    );
+                BrowserMeetingSnapshot::Exclude => {
+                    if browser_window_has_provider_signal(
+                        web_area_url.as_deref(),
+                        window_title.as_deref(),
+                    ) {
+                        warnings.push(
+                            "a browser window lacked matching meeting-origin and title/control signals; it was excluded"
+                                .to_string(),
+                        );
+                    }
+                    None
                 }
-                return None;
             }
-
-            Some((
-                BrowserMeetingRoot {
-                    platform,
-                    window_title,
-                    web_area_url,
-                    nodes,
-                },
-                web_area,
-            ))
         })
         .collect();
 
@@ -1250,16 +1521,12 @@ fn browser_window_has_provider_signal(url: Option<&str>, title: Option<&str>) ->
 
 #[cfg(target_os = "macos")]
 fn focused_web_area_element(ax_app: &ax::UiElement) -> Option<arc::R<ax::UiElement>> {
-    let mut element = ax_app.focused_ui_element().ok()?;
+    let mut element = ax_element_attr(ax_app, ax::attr::focused_ui_element())?;
     for _ in 0..=MAX_TREE_DEPTH {
-        if element
-            .role()
-            .ok()
-            .is_some_and(|role| role.to_string() == "AXWebArea")
-        {
+        if string_attr(&element, ax::attr::role()).as_deref() == Some("AXWebArea") {
             return Some(element);
         }
-        element = element.parent().ok()?;
+        element = ax_element_attr(&element, ax::attr::parent())?;
     }
     None
 }
@@ -1270,9 +1537,7 @@ fn active_web_area_element(
     focused_web_area: Option<&ax::UiElement>,
 ) -> (Option<arc::R<ax::UiElement>>, bool) {
     if let Some(focused_web_area) = focused_web_area {
-        let belongs_to_window = focused_web_area
-            .window()
-            .ok()
+        let belongs_to_window = ax_element_attr(focused_web_area, ax::attr::window())
             .is_some_and(|focused_window| focused_window.equal(window));
         if belongs_to_window {
             return (Some(focused_web_area.retained()), true);
@@ -1300,16 +1565,15 @@ fn collect_web_area_elements(
     }
     *visited += 1;
 
-    let Ok(role) = element.role() else {
+    let Some(role) = string_attr(element, ax::attr::role()) else {
         return false;
     };
-    let role = role.to_string();
     if role == "AXWebArea" {
         web_areas.push(element.retained());
         return true;
     }
 
-    let Ok(children) = element.children() else {
+    let Some(children) = ax_element_array(element, ax::attr::children()) else {
         return !ax_role_may_have_children(&role);
     };
     let mut complete = true;
@@ -1331,16 +1595,30 @@ fn collect_window_elements(
     }
     *visited += 1;
 
-    let Ok(role) = element.role() else {
+    let Some(role) = string_attr(element, ax::attr::role()) else {
         return false;
     };
-    let role = role.to_string();
+    if role == "AXApplication" {
+        let Some(app_windows) = ax_element_array(element, ax::attr::windows()) else {
+            return false;
+        };
+        for window in app_windows.iter().map(ax::UiElement::retained).chain(
+            [ax::attr::main_window(), ax::attr::focused_window()]
+                .into_iter()
+                .filter_map(|attr| ax_element_attr(element, attr)),
+        ) {
+            if !windows.iter().any(|existing| existing.equal(&window)) {
+                windows.push(window);
+            }
+        }
+        return true;
+    }
     if role == "AXWindow" {
         windows.push(element.retained());
         return true;
     }
 
-    let Ok(children) = element.children() else {
+    let Some(children) = ax_element_array(element, ax::attr::children()) else {
         return !ax_role_may_have_children(&role);
     };
     let mut complete = true;
@@ -1480,7 +1758,7 @@ fn collect_chat_elements(
         labels: node_labels(&node).map(str::to_string).collect(),
     });
 
-    let Ok(children) = element.children() else {
+    let Some(children) = walkable_children(element, depth == 0) else {
         ancestors.pop();
         return;
     };
@@ -1596,19 +1874,6 @@ fn inspect_app(
         classify_platform(&app.id, window_title.as_deref(), &nodes, bundle_platform)
     });
     let surface = classify_surface(&app.id, &platform);
-    let participant_streams = find_participant_streams(&platform, &surface, &nodes);
-    let mut active_speaker_names = HashSet::new();
-    let active_speakers = participant_streams
-        .iter()
-        .filter(|stream| stream.is_active_speaker)
-        .filter_map(|stream| {
-            stream
-                .participant_name
-                .clone()
-                .or_else(|| stream.label.clone())
-        })
-        .filter(|name| active_speaker_names.insert(name.trim().to_ascii_lowercase()))
-        .collect();
     MeetingAccessibilityInspection {
         app,
         pid,
@@ -1616,8 +1881,6 @@ fn inspect_app(
         surface,
         accessibility_trusted,
         window_title,
-        participant_streams,
-        active_speakers,
         warnings,
     }
 }
@@ -1629,6 +1892,7 @@ fn collect_nodes(
     nodes: &mut Vec<AxNode>,
     warnings: &mut Vec<String>,
 ) -> bool {
+    maybe_note_visible_child_walk(element, warnings);
     let mut tree_path = Vec::new();
     let mut truncated = false;
     collect_nodes_with_scope(
@@ -1676,9 +1940,8 @@ fn collect_nodes_with_scope(
     node.within_slack_huddle_scope = within_slack_huddle_scope;
     nodes.push(node);
 
-    let children = match element.children() {
-        Ok(children) => children,
-        Err(_) => return,
+    let Some(children) = walkable_children(element, tree_path.is_empty()) else {
+        return;
     };
 
     for (child_index, child) in children.iter().enumerate() {
@@ -1703,20 +1966,86 @@ fn collect_nodes_with_scope(
 }
 
 #[cfg(target_os = "macos")]
+fn ax_element_array(
+    element: &ax::UiElement,
+    attr: &ax::Attr,
+) -> Option<arc::R<cf::ArrayOf<ax::UiElement>>> {
+    let value = ax_attr_value(element, attr).ok()?;
+    if value.get_type_id() != cf::Array::type_id() {
+        return None;
+    }
+    Some(unsafe {
+        std::mem::transmute::<arc::R<cf::Type>, arc::R<cf::ArrayOf<ax::UiElement>>>(value)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn ax_element_attr(element: &ax::UiElement, attr: &ax::Attr) -> Option<arc::R<ax::UiElement>> {
+    let value = ax_attr_value(element, attr).ok()?;
+    if value.get_type_id() != ax::UiElement::type_id() {
+        return None;
+    }
+    Some(unsafe { std::mem::transmute::<arc::R<cf::Type>, arc::R<ax::UiElement>>(value) })
+}
+
+#[cfg(target_os = "macos")]
+fn walkable_children(
+    element: &ax::UiElement,
+    allow_visible_subset: bool,
+) -> Option<arc::R<cf::ArrayOf<ax::UiElement>>> {
+    let children = ax_element_array(element, ax::attr::children());
+    if children
+        .as_ref()
+        .is_some_and(|array| !array.is_empty() && (!allow_visible_subset || array.len() <= 64))
+    {
+        return children;
+    }
+
+    let visible = ax_element_array(element, ax::attr::visible_children());
+    match select_child_walk(
+        children.as_ref().map(|array| array.len()),
+        visible.as_ref().map(|array| array.len()),
+        allow_visible_subset,
+    ) {
+        Some(ChildWalk::Visible) => visible,
+        Some(ChildWalk::Children) => children,
+        None => None,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn maybe_note_visible_child_walk(element: &ax::UiElement, warnings: &mut Vec<String>) {
+    let Some(children) = ax_element_array(element, ax::attr::children()) else {
+        return;
+    };
+    let Some(visible) = ax_element_array(element, ax::attr::visible_children()) else {
+        return;
+    };
+    if select_child_walk(Some(children.len()), Some(visible.len()), true)
+        != Some(ChildWalk::Visible)
+    {
+        return;
+    }
+    warnings.push(format!(
+        "using AXVisibleChildren at the meeting root ({} visible of {} children)",
+        visible.len(),
+        children.len()
+    ));
+}
+
+#[cfg(target_os = "macos")]
 fn snapshot_node(element: &ax::UiElement, index: usize) -> AxNode {
     let element_hash = Some(element.hash());
-    let role = element.role().ok().map(|role| role.to_string());
+    let role = string_attr(element, ax::attr::role());
     let identifier = string_attr(element, ax::attr::id());
     let title = string_attr(element, ax::attr::title());
     let value = string_attr(element, ax::attr::value());
-    let description = string_attr(element, ax::attr::desc());
+    let description =
+        string_attr(element, ax::attr::desc()).or_else(|| string_attr(element, ax::attr::help()));
     let placeholder = string_attr(element, ax::attr::placeholder_value());
-    let enabled = element.is_enabled().ok().map(|enabled| enabled.value());
-    let settable_value = element.is_settable(ax::attr::value()).unwrap_or(false);
-    let bounds = element
-        .frame()
-        .ok()
-        .and_then(|frame| frame.cg_rect())
+    let enabled = ax_bool_attr(element, ax::attr::enabled());
+    let settable_value = ax_is_settable(element, ax::attr::value());
+    let bounds = ax_frame(element)
         .or_else(|| rect_from_position_and_size(element))
         .map(AxRect::from);
     let text = searchable_node_text(
@@ -1750,13 +2079,13 @@ fn snapshot_node(element: &ax::UiElement, index: usize) -> AxNode {
 
 #[cfg(target_os = "macos")]
 fn string_attr(element: &ax::UiElement, attr: &ax::Attr) -> Option<String> {
-    let value = element.attr_value(attr).ok()?;
+    let value = ax_attr_value(element, attr).ok()?;
     value.try_as_string().map(|s| s.to_string())
 }
 
 #[cfg(target_os = "macos")]
 fn url_attr(element: &ax::UiElement) -> Option<String> {
-    let value = element.attr_value(ax::attr::url()).ok()?;
+    let value = ax_attr_value(element, ax::attr::url()).ok()?;
     if let Some(value) = value.try_as_string() {
         return Some(value.to_string());
     }
@@ -1771,9 +2100,66 @@ fn url_attr(element: &ax::UiElement) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
+fn ax_attr_value(element: &ax::UiElement, attribute: &ax::Attr) -> Result<arc::R<cf::Type>, i32> {
+    let mut value = None;
+    // cidre's closed AXError enum aborts on valid error codes returned by stale UI elements.
+    let status = unsafe { ax_ui_element_copy_attribute_value_raw(element, attribute, &mut value) };
+    if status == 0 {
+        value.ok_or(-1)
+    } else {
+        Err(status)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn ax_bool_attr(element: &ax::UiElement, attribute: &ax::Attr) -> Option<bool> {
+    let value = ax_attr_value(element, attribute).ok()?;
+    if value.get_type_id() != cf::Boolean::type_id() {
+        return None;
+    }
+    let value_ref: &cf::Type = &value;
+    let boolean = unsafe { &*(std::ptr::from_ref(value_ref).cast::<cf::Boolean>()) };
+    Some(boolean.value())
+}
+
+#[cfg(target_os = "macos")]
+fn ax_value_attr(element: &ax::UiElement, attribute: &ax::Attr) -> Option<arc::R<ax::Value>> {
+    let value = ax_attr_value(element, attribute).ok()?;
+    if value.get_type_id() != ax::Value::type_id() {
+        return None;
+    }
+    Some(unsafe { std::mem::transmute::<arc::R<cf::Type>, arc::R<ax::Value>>(value) })
+}
+
+#[cfg(target_os = "macos")]
+fn ax_frame(element: &ax::UiElement) -> Option<cg::Rect> {
+    ax_value_attr(element, ax::attr::frame())?.cg_rect()
+}
+
+#[cfg(target_os = "macos")]
+fn ax_is_settable(element: &ax::UiElement, attribute: &ax::Attr) -> bool {
+    let mut settable = false;
+    let status =
+        unsafe { ax_ui_element_is_attribute_settable_raw(element, attribute, &mut settable) };
+    status == 0 && settable
+}
+
+#[cfg(target_os = "macos")]
+fn ax_perform_action(element: &ax::UiElement, action: &ax::Action) -> Result<(), i32> {
+    let status = unsafe { ax_ui_element_perform_action_raw(element, action) };
+    (status == 0).then_some(()).ok_or(status)
+}
+
+#[cfg(target_os = "macos")]
+fn ax_set_attr(element: &ax::UiElement, attribute: &ax::Attr, value: &cf::Type) -> Result<(), i32> {
+    let status = unsafe { ax_ui_element_set_attribute_value_raw(element, attribute, value) };
+    (status == 0).then_some(()).ok_or(status)
+}
+
+#[cfg(target_os = "macos")]
 fn rect_from_position_and_size(element: &ax::UiElement) -> Option<cg::Rect> {
-    let position = element.pos().ok()?.cg_point()?;
-    let size = element.size().ok()?.cg_size()?;
+    let position = ax_value_attr(element, ax::attr::pos())?.cg_point()?;
+    let size = ax_value_attr(element, ax::attr::size())?.cg_size()?;
     Some(cg::Rect {
         origin: position,
         size,
@@ -1787,11 +2173,15 @@ fn slack_huddle_context(nodes: &[AxNode]) -> Option<(String, String)> {
         return None;
     }
 
-    nodes.iter().find_map(|node| {
+    if let Some(context) = nodes.iter().find_map(|node| {
         node_labels(node).find_map(|label| {
             slack_huddle_channel_from_label(label).map(|channel| (label.to_string(), channel))
         })
-    })
+    }) {
+        return Some(context);
+    }
+
+    None
 }
 
 #[cfg(any(test, target_os = "macos", target_os = "linux"))]

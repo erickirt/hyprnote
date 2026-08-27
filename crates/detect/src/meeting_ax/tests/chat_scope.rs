@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use super::*;
 
 #[test]
@@ -9,25 +11,29 @@ fn test_meeting_chat_message_validation() {
 }
 
 #[test]
-fn test_chat_mutation_is_enabled_for_recognized_meeting_apps() {
+fn test_chat_mutation_is_enabled_only_for_macos_slack_huddles() {
+    for bundle_id in ["com.tinyspeck.slackmacgap", "com.slack.Slack", "slack"] {
+        assert_eq!(
+            supports_meeting_chat_mutation(bundle_id),
+            cfg!(target_os = "macos"),
+            "{bundle_id} should be eligible for AX chat mutation only on macOS"
+        );
+    }
     for bundle_id in [
-        "com.tinyspeck.slackmacgap",
-        "com.slack.Slack",
         "us.zoom.xos",
         "com.microsoft.teams2",
         "Cisco-Systems.Spark",
         "com.google.Chrome",
         "com.hnc.Discord",
-        "slack",
         "zoom",
         "google-chrome",
+        "com.anarlog.dev",
     ] {
         assert!(
-            supports_meeting_chat_mutation(bundle_id),
-            "{bundle_id} should be eligible for AX chat mutation"
+            !supports_meeting_chat_mutation(bundle_id),
+            "{bundle_id} should remain ineligible for AX chat mutation"
         );
     }
-    assert!(!supports_meeting_chat_mutation("com.anarlog.dev"));
 }
 
 #[test]
@@ -41,6 +47,14 @@ fn test_linux_and_windows_process_aliases_map_to_meeting_apps() {
         ("google-chrome", MeetingPlatform::Unknown, true),
         ("chrome", MeetingPlatform::Unknown, true),
         ("firefox", MeetingPlatform::Unknown, true),
+        ("firefox-bin", MeetingPlatform::Unknown, true),
+        ("opera-stable", MeetingPlatform::Unknown, true),
+        ("opera-beta", MeetingPlatform::Unknown, true),
+        ("opera-developer", MeetingPlatform::Unknown, true),
+        ("browseros", MeetingPlatform::Unknown, true),
+        ("helium", MeetingPlatform::Unknown, true),
+        ("zen", MeetingPlatform::Unknown, true),
+        ("zen-bin", MeetingPlatform::Unknown, true),
     ] {
         assert!(
             is_meeting_app_bundle(alias),
@@ -155,7 +169,7 @@ fn test_zoom_scope_does_not_fall_back_to_an_unrelated_slack_huddle() {
     let scoped_bundle = unique_recognized_meeting_bundle(&bundle_ids).unwrap();
 
     assert_eq!(scoped_bundle, "us.zoom.xos");
-    assert!(supports_meeting_chat_mutation(scoped_bundle));
+    assert!(!supports_meeting_chat_mutation(scoped_bundle));
 }
 
 #[test]
@@ -237,6 +251,14 @@ fn test_browser_chat_scope_requires_live_exit_visible_composer_and_platform_cont
         Some((vec![1], vec![1, 0]))
     );
 
+    let mut disabled_composer_nodes = meet_nodes.clone();
+    disabled_composer_nodes[3].enabled = Some(false);
+    assert!(validated_chat_scope(&MeetingPlatform::GoogleMeet, &disabled_composer_nodes).is_none());
+    assert_eq!(
+        validated_chat_capture_scope(&MeetingPlatform::GoogleMeet, &disabled_composer_nodes),
+        Some((vec![1], vec![1, 0]))
+    );
+
     let mut prejoin_nodes = meet_nodes.clone();
     prejoin_nodes[1] = fixture_node(1, "AXButton", "Turn off microphone", &[0]);
     assert!(validated_chat_scope(&MeetingPlatform::GoogleMeet, &prejoin_nodes).is_none());
@@ -254,6 +276,40 @@ fn test_browser_chat_scope_requires_live_exit_visible_composer_and_platform_cont
     let mut support_widget_nodes = meet_nodes.clone();
     support_widget_nodes[2] = fixture_node(2, "AXGroup", "Support chat", &[1]);
     assert!(validated_chat_scope(&MeetingPlatform::GoogleMeet, &support_widget_nodes).is_none());
+}
+
+#[test]
+fn test_browser_chat_scope_accepts_explicit_heading_beside_the_composer() {
+    let meet_nodes = vec![
+        fixture_node(0, "AXWebArea", "Team sync - Google Meet", &[]),
+        fixture_node(1, "AXButton", "Leave call", &[0]),
+        fixture_node(2, "AXGroup", "", &[1]),
+        fixture_node(3, "AXHeading", "In-call messages", &[1, 0]),
+        fixture_composer(4, "Send a message", &[1, 1, 0]),
+    ];
+
+    assert_eq!(
+        validated_chat_scope(&MeetingPlatform::GoogleMeet, &meet_nodes),
+        Some((vec![1], vec![1, 1, 0]))
+    );
+}
+
+#[test]
+fn test_teams_capture_accepts_deep_light_meeting_composer_below_explicit_heading() {
+    let composer_path = vec![1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let nodes = vec![
+        fixture_node(0, "AXWebArea", "Microsoft Teams meeting", &[]),
+        fixture_node(1, "AXButton", "Leave", &[0]),
+        fixture_node(2, "AXGroup", "", &[1]),
+        fixture_node(3, "AXHeading", "Meeting chat", &[1, 0, 0, 0]),
+        fixture_composer(4, "Type a message", &composer_path),
+    ];
+
+    assert_eq!(
+        validated_chat_capture_scope(&MeetingPlatform::MicrosoftTeams, &nodes),
+        Some((vec![1], composer_path))
+    );
+    assert!(validated_chat_scope(&MeetingPlatform::MicrosoftTeams, &nodes).is_none());
 }
 
 #[test]
@@ -323,6 +379,154 @@ fn test_platform_chat_adapters_validate_the_requested_provider_matrix() {
     let mut ordinary_channel_nodes = slack_nodes;
     ordinary_channel_nodes[2] = fixture_node(2, "AXGroup", "Channel test", &[1]);
     assert!(validated_chat_scope(&MeetingPlatform::Slack, &ordinary_channel_nodes).is_none());
+}
+
+#[test]
+fn test_zoom_web_chat_scope_accepts_live_message_list_and_composer_labels() {
+    let nodes = vec![
+        fixture_node(0, "AXWebArea", "John Jeong's Zoom Meeting", &[]),
+        fixture_node(1, "AXButton", "Leave", &[0]),
+        fixture_node(2, "AXGroup", "Chat Message List", &[4, 0]),
+        fixture_composer(3, "Type message here ...", &[4, 1, 0]),
+    ];
+
+    assert_eq!(
+        validated_chat_capture_scope(&MeetingPlatform::Zoom, &nodes),
+        Some((vec![4], vec![4, 1, 0]))
+    );
+}
+
+#[test]
+fn test_zoom_web_chat_scope_ignores_help_text_when_matching_exact_label() {
+    let mut scope = fixture_node(2, "AXGroup", "Chat", &[4, 0]);
+    scope.description = Some("View messages shared during this meeting".to_string());
+    let nodes = vec![
+        fixture_node(0, "AXWebArea", "John Jeong's Zoom Meeting", &[]),
+        fixture_node(1, "AXButton", "Leave", &[0]),
+        scope,
+        fixture_composer(3, "Type message here ...", &[4, 1, 0]),
+    ];
+
+    assert_eq!(
+        validated_chat_capture_scope(&MeetingPlatform::Zoom, &nodes),
+        Some((vec![4], vec![4, 1, 0]))
+    );
+}
+
+#[test]
+fn test_native_webex_chat_scope_accepts_live_history_and_composer_labels() {
+    let nodes = vec![
+        fixture_node(0, "AXWindow", "John's meeting", &[]),
+        fixture_node(
+            1,
+            "AXButton",
+            "Leave meeting or end meeting for everyone",
+            &[0],
+        ),
+        fixture_node(
+            2,
+            "AXScrollArea",
+            "thread conversation history, list",
+            &[1, 0],
+        ),
+        fixture_composer(
+            3,
+            "Write a message to everyone, Shift + Enter for a new line",
+            &[1, 1],
+        ),
+    ];
+
+    assert_eq!(
+        validated_chat_capture_scope(&MeetingPlatform::Webex, &nodes),
+        Some((vec![1], vec![1, 1]))
+    );
+}
+
+#[test]
+fn test_native_linux_webex_capture_accepts_read_only_atspi_composer() {
+    let nodes = vec![
+        fixture_node(0, "AXWindow", "John's meeting", &[]),
+        fixture_node(1, "AXButton", "Leave meeting", &[1, 0]),
+        fixture_node(
+            2,
+            "AXGroup",
+            "Chat Tab list, Everyone tab",
+            &[1, 1, 0, 1, 0],
+        ),
+        fixture_node(
+            3,
+            "AXStaticText",
+            "Write a message to everyone. Press Shift + Enter for new line.",
+            &[1, 1, 0, 2, 0, 2, 0, 5, 4, 0],
+        ),
+    ];
+
+    assert_eq!(
+        validated_chat_capture_scope(&MeetingPlatform::Webex, &nodes),
+        Some((vec![1, 1, 0], vec![1, 1, 0, 2, 0, 2, 0, 5, 4, 0]))
+    );
+    assert!(validated_chat_scope(&MeetingPlatform::Webex, &nodes).is_none());
+}
+
+#[test]
+fn test_webex_web_chat_scope_accepts_live_popup_leave_and_named_composer() {
+    let nodes = vec![
+        fixture_node(0, "AXWebArea", "In meeting · Meeting · Webex", &[]),
+        fixture_node(1, "AXPopUpButton", "Leave meeting", &[0]),
+        fixture_node(2, "AXGroup", "Chat with Everyone", &[1]),
+        fixture_composer(3, "Write a message to John Jeong's meeting", &[1, 0]),
+    ];
+
+    assert_eq!(
+        validated_chat_capture_scope(&MeetingPlatform::Webex, &nodes),
+        Some((vec![1], vec![1, 0]))
+    );
+}
+
+#[test]
+fn test_firefox_webex_chat_scope_accepts_combobox_composer() {
+    let mut composer = fixture_node(
+        3,
+        "AXComboBox",
+        "Write a message to John Jeong's meeting",
+        &[1, 0],
+    );
+    composer.settable_value = true;
+    let nodes = vec![
+        fixture_node(0, "AXWebArea", "In meeting · Meeting · Webex", &[]),
+        fixture_node(1, "AXButton", "Leave meeting", &[0]),
+        fixture_node(2, "AXGroup", "Chat with Everyone", &[1]),
+        composer,
+    ];
+
+    assert_eq!(
+        validated_chat_capture_scope(&MeetingPlatform::Webex, &nodes),
+        Some((vec![1], vec![1, 0]))
+    );
+}
+
+#[test]
+fn test_safari_webex_chat_scope_accepts_repeated_accessible_label() {
+    let mut scope = fixture_node(2, "AXGroup", "Chat with Everyone", &[1]);
+    scope.description = Some("Chat with Everyone".to_string());
+    let mut composer = fixture_node(
+        3,
+        "AXComboBox",
+        "Write a message to John Jeong's meeting",
+        &[1, 0],
+    );
+    composer.settable_value = true;
+    let nodes = vec![
+        fixture_node(0, "AXWebArea", "In meeting · Meeting · Webex", &[]),
+        fixture_node(1, "AXPopUpButton", "Leave meeting", &[0]),
+        scope,
+        composer,
+    ];
+
+    assert_eq!(
+        validated_chat_capture_scope(&MeetingPlatform::Webex, &nodes),
+        Some((vec![1], vec![1, 0]))
+    );
 }
 
 #[test]
@@ -415,6 +619,73 @@ fn test_web_capture_ignores_aggregate_containers() {
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].text, "First message");
     assert_eq!(messages[1].text, "Second message");
+}
+
+#[test]
+fn test_aside_blank_web_area_uses_meet_code_identity() {
+    let nodes = vec![
+        fixture_node(0, "AXWebArea", "", &[]),
+        fixture_node(1, "AXButton", "Leave call", &[0]),
+        fixture_node(2, "AXGroup", "In-call messages", &[1]),
+        fixture_composer(3, "Send a message", &[1, 0]),
+    ];
+    let root = |title: &str| BrowserMeetingRoot {
+        platform: MeetingPlatform::GoogleMeet,
+        window_title: Some(title.to_string()),
+        web_area_url: Some("about:blank".into()),
+        nodes: nodes.clone(),
+    };
+
+    let first = browser_capture_context_id(&root("Meet - jyz-nspz-tzk")).unwrap();
+    let same = browser_capture_context_id(&root("Meet - jyz-nspz-tzk - Aside")).unwrap();
+    let other = browser_capture_context_id(&root("Meet - abc-defg-hij")).unwrap();
+
+    assert_eq!(first, same);
+    assert_ne!(first, other);
+}
+
+#[test]
+fn test_linux_browser_context_falls_back_to_titled_active_call_identity() {
+    let nodes = vec![
+        fixture_node(0, "AXWebArea", "John Jeong's Zoom Meeting", &[]),
+        fixture_node(1, "AXButton", "Leave", &[0]),
+        fixture_node(2, "AXGroup", "Chat Message List", &[1]),
+        fixture_composer(3, "Type message here ...", &[1, 0]),
+    ];
+    let root = |title: &str| BrowserMeetingRoot {
+        platform: MeetingPlatform::Zoom,
+        window_title: Some(title.to_string()),
+        web_area_url: None,
+        nodes: nodes.clone(),
+    };
+
+    let first =
+        browser_capture_context_id(&root("John Jeong's Zoom Meeting - Google Chrome")).unwrap();
+    let same =
+        browser_capture_context_id(&root("John Jeong's Zoom Meeting - Google Chrome")).unwrap();
+    let next =
+        browser_capture_context_id(&root("Grace Hopper's Zoom Meeting - Google Chrome")).unwrap();
+
+    assert_eq!(first, same);
+    assert_ne!(first, next);
+}
+
+#[test]
+fn test_linux_meet_context_without_code_falls_back_to_titled_active_call_identity() {
+    let nodes = vec![
+        fixture_node(0, "AXWebArea", "Team sync - Google Meet", &[]),
+        fixture_node(1, "AXButton", "Leave call", &[0]),
+        fixture_node(2, "AXGroup", "In-call messages", &[1]),
+        fixture_composer(3, "Send a message", &[1, 0]),
+    ];
+    let root = BrowserMeetingRoot {
+        platform: MeetingPlatform::GoogleMeet,
+        window_title: Some("Team sync - Google Meet - Google Chrome".to_string()),
+        web_area_url: None,
+        nodes,
+    };
+
+    assert!(browser_capture_context_id(&root).is_some());
 }
 
 #[test]

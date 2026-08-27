@@ -4,7 +4,8 @@ use std::collections::HashSet;
 use cidre::ns;
 
 use super::{
-    AxNode, MeetingApp, MeetingPlatform, MeetingSurface, is_platform_meeting_control, node_labels,
+    AxNode, MeetingApp, MeetingPlatform, MeetingSurface, is_platform_active_call_control,
+    is_platform_meeting_control, node_has_positive_bounds, node_labels,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -34,6 +35,9 @@ impl MeetingAppBundle {
     }
 }
 
+// Recognition list. Live-acceptance grouping is native, then tier-1 browsers
+// (Chrome, Edge, Firefox, Safari, Aside), then secondary. Close gates live on
+// ANLG-297 (chat and disclosure share one host matrix).
 pub(super) const MEETING_APP_BUNDLES: &[MeetingAppBundle] = &[
     MeetingAppBundle::native("us.zoom.xos"),
     MeetingAppBundle::native("com.microsoft.teams2"),
@@ -46,15 +50,16 @@ pub(super) const MEETING_APP_BUNDLES: &[MeetingAppBundle] = &[
     MeetingAppBundle::native("com.cisco.webex"),
     MeetingAppBundle::native("com.cisco.webexmeetingsapp"),
     MeetingAppBundle::browser("com.google.Chrome"),
-    MeetingAppBundle::browser("com.google.Chrome.canary"),
     MeetingAppBundle::browser("com.microsoft.edgemac"),
+    MeetingAppBundle::browser("org.mozilla.firefox"),
+    MeetingAppBundle::browser("com.apple.Safari"),
+    MeetingAppBundle::browser("at.studio.AsideBrowser"),
+    MeetingAppBundle::browser("com.google.Chrome.canary"),
     MeetingAppBundle::browser("com.microsoft.edgemac.Beta"),
     MeetingAppBundle::browser("com.microsoft.edgemac.Canary"),
     MeetingAppBundle::browser("com.microsoft.edgemac.Dev"),
-    MeetingAppBundle::browser("org.mozilla.firefox"),
     MeetingAppBundle::browser("org.mozilla.firefoxdeveloperedition"),
     MeetingAppBundle::browser("org.mozilla.nightly"),
-    MeetingAppBundle::browser("com.apple.Safari"),
     MeetingAppBundle::browser("com.apple.SafariTechnologyPreview"),
     MeetingAppBundle::browser("com.brave.Browser"),
     MeetingAppBundle::browser("com.brave.Browser.beta"),
@@ -66,12 +71,13 @@ pub(super) const MEETING_APP_BUNDLES: &[MeetingAppBundle] = &[
     MeetingAppBundle::browser("com.operasoftware.OperaGX"),
     MeetingAppBundle::browser("com.operasoftware.OperaNext"),
     MeetingAppBundle::browser("company.thebrowser.Browser"),
+    MeetingAppBundle::browser("com.browseros.BrowserOS"),
     MeetingAppBundle::browser("ai.perplexity.comet"),
-    MeetingAppBundle::browser("at.studio.AsideBrowser"),
     MeetingAppBundle::browser("company.thebrowser.dia"),
     MeetingAppBundle::browser("com.sigmaos.sigmaos.macos"),
     MeetingAppBundle::browser("net.imput.helium"),
     MeetingAppBundle::browser("com.nousresearch.hermes"),
+    MeetingAppBundle::browser("app.zen-browser.zen"),
 ];
 
 pub(super) fn meeting_app_alias_key(id: &str) -> String {
@@ -104,13 +110,18 @@ pub(super) fn canonicalize_meeting_app_id(id: &str) -> String {
             "com.google.Chrome".to_string()
         }
         "chromium" | "chromium-browser" => "org.chromium.Chromium".to_string(),
-        "firefox" => "org.mozilla.firefox".to_string(),
+        "firefox" | "firefox-bin" => "org.mozilla.firefox".to_string(),
         "microsoft-edge" | "microsoft-edge-stable" | "msedge" => {
             "com.microsoft.edgemac".to_string()
         }
         "brave" | "brave-browser" => "com.brave.Browser".to_string(),
         "vivaldi" | "vivaldi-stable" => "com.vivaldi.Vivaldi".to_string(),
-        "opera" => "com.operasoftware.Opera".to_string(),
+        "opera" | "opera-stable" => "com.operasoftware.Opera".to_string(),
+        "opera-beta" => "com.operasoftware.OperaNext".to_string(),
+        "opera-developer" => "com.operasoftware.OperaDeveloper".to_string(),
+        "browseros" => "com.browseros.BrowserOS".to_string(),
+        "helium" | "helium-browser" => "net.imput.helium".to_string(),
+        "zen" | "zen-bin" | "zen-browser" => "app.zen-browser.zen".to_string(),
         _ => trimmed.to_string(),
     }
 }
@@ -189,6 +200,25 @@ pub(super) fn running_meeting_apps() -> Vec<(MeetingApp, i32)> {
 }
 
 #[cfg(not(target_os = "macos"))]
+fn process_matches_meeting_family(process: &sysinfo::Process, family: &str) -> bool {
+    let process_name = process.name().to_string_lossy();
+    let exe_name = process
+        .exe()
+        .and_then(|path| path.file_name())
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default();
+    let command = process
+        .cmd()
+        .first()
+        .map(|part| part.to_string_lossy())
+        .unwrap_or_default();
+
+    [process_name.as_ref(), exe_name.as_ref(), command.as_ref()]
+        .into_iter()
+        .any(|candidate| meeting_app_family(candidate) == Some(family))
+}
+
+#[cfg(not(target_os = "macos"))]
 pub(super) fn running_apps_for_bundle(bundle_id: &str) -> Vec<(MeetingApp, i32)> {
     let Some(family) = meeting_app_family(bundle_id) else {
         return Vec::new();
@@ -202,23 +232,17 @@ pub(super) fn running_apps_for_bundle(bundle_id: &str) -> Vec<(MeetingApp, i32)>
         .processes()
         .iter()
         .filter_map(|(pid, process)| {
-            let process_name = process.name().to_string_lossy().into_owned();
-            let exe_name = process
-                .exe()
-                .and_then(|path| path.file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let command = process
-                .cmd()
-                .first()
-                .map(|part| part.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let matches = [process_name.as_str(), exe_name.as_str(), command.as_str()]
-                .into_iter()
-                .any(|candidate| meeting_app_family(candidate) == Some(family));
-            if !matches {
+            if process.thread_kind().is_some()
+                || process.status() == sysinfo::ProcessStatus::Zombie
+                || !process_matches_meeting_family(process, family)
+                || process
+                    .parent()
+                    .and_then(|parent| system.process(parent))
+                    .is_some_and(|parent| process_matches_meeting_family(parent, family))
+            {
                 return None;
             }
+            let process_name = process.name().to_string_lossy().into_owned();
 
             let pid = i32::try_from(pid.as_u32()).ok()?;
             if !seen.insert(pid) {
@@ -281,7 +305,22 @@ pub(super) fn classify_bundle(bundle_id: &str) -> MeetingPlatform {
 }
 
 pub(super) fn supports_meeting_chat_mutation(bundle_id: &str) -> bool {
-    meeting_app_family(bundle_id).is_some()
+    cfg!(target_os = "macos") && meeting_app_family(bundle_id) == Some("slack")
+}
+
+pub(super) fn is_browser_active_call_control(platform: &MeetingPlatform, node: &AxNode) -> bool {
+    if is_platform_active_call_control(platform, node) {
+        return true;
+    }
+
+    *platform == MeetingPlatform::MicrosoftTeams
+        && matches!(
+            node.role.as_deref(),
+            Some("AXButton") | Some("AXMenuItem") | Some("AXPopUpButton")
+        )
+        && node.enabled != Some(false)
+        && node_has_positive_bounds(node)
+        && node_labels(node).any(|label| label.trim().eq_ignore_ascii_case("leave"))
 }
 
 pub(super) fn classify_browser_context(
@@ -290,25 +329,41 @@ pub(super) fn classify_browser_context(
     active_web_area: Option<&AxNode>,
     nodes: &[AxNode],
 ) -> MeetingPlatform {
-    let Some(platform) = browser_platform_from_url(web_area_url) else {
-        return MeetingPlatform::Unknown;
-    };
-
     let mut title_platforms = window_title
         .into_iter()
         .chain(active_web_area.into_iter().flat_map(node_labels))
         .flat_map(browser_title_platform_signals)
         .collect::<Vec<_>>();
     title_platforms.dedup();
-    if title_platforms.iter().any(|signal| signal != &platform) {
+
+    if let Some(platform) = browser_platform_from_url(web_area_url) {
+        if title_platforms.iter().any(|signal| signal != &platform) {
+            return MeetingPlatform::Unknown;
+        }
+        let has_matching_title = title_platforms.contains(&platform);
+        let has_matching_control = nodes.iter().any(|node| {
+            is_platform_meeting_control(&platform, node)
+                || is_browser_active_call_control(&platform, node)
+        });
+
+        return if has_matching_title || has_matching_control {
+            platform
+        } else {
+            MeetingPlatform::Unknown
+        };
+    }
+
+    if title_platforms.len() != 1 {
         return MeetingPlatform::Unknown;
     }
-    let has_matching_title = title_platforms.contains(&platform);
-    let has_matching_control = nodes
-        .iter()
-        .any(|node| is_platform_meeting_control(&platform, node));
-
-    if has_matching_title || has_matching_control {
+    let platform = title_platforms.remove(0);
+    let titled_like_meet_code = window_title
+        .is_some_and(|title| looks_like_google_meet_window_title(&title.to_ascii_lowercase()));
+    let has_matching_control = nodes.iter().any(|node| {
+        is_platform_meeting_control(&platform, node)
+            || is_browser_active_call_control(&platform, node)
+    });
+    if titled_like_meet_code || has_matching_control {
         platform
     } else {
         MeetingPlatform::Unknown
@@ -346,7 +401,7 @@ pub(super) fn browser_title_platform_signals(text: &str) -> Vec<MeetingPlatform>
     let text = text.to_ascii_lowercase();
     let mut platforms = Vec::new();
 
-    if text.contains("google meet") {
+    if text.contains("google meet") || looks_like_google_meet_window_title(&text) {
         platforms.push(MeetingPlatform::GoogleMeet);
     }
     if text.contains("microsoft teams") || text.contains("teams meeting") {
@@ -361,11 +416,46 @@ pub(super) fn browser_title_platform_signals(text: &str) -> Vec<MeetingPlatform>
     if text.contains("discord") && (text.contains("voice") || text.contains("call")) {
         platforms.push(MeetingPlatform::Discord);
     }
-    if text.contains("webex meeting") || text.contains("cisco webex") {
+    if text.contains("cisco webex") || (text.contains("webex") && text.contains("meeting")) {
         platforms.push(MeetingPlatform::Webex);
     }
 
     platforms
+}
+
+pub(super) fn google_meet_code_from_title(title: &str) -> Option<String> {
+    let text = title.trim().to_ascii_lowercase();
+    let rest = text.strip_prefix("meet - ")?;
+    let code = rest
+        .split(" - ")
+        .next()?
+        .split_whitespace()
+        .next()?
+        .to_string();
+    looks_like_google_meet_window_title(&format!("meet - {code}")).then_some(code)
+}
+
+fn looks_like_google_meet_window_title(text: &str) -> bool {
+    let Some(rest) = text.strip_prefix("meet - ") else {
+        return false;
+    };
+    let code = rest
+        .split(" - ")
+        .next()
+        .unwrap_or(rest)
+        .trim()
+        .split_whitespace()
+        .next()
+        .unwrap_or("");
+    let mut parts = code.split('-');
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some(first), Some(second), Some(third), None)
+            if first.len() == 3
+                && second.len() == 4
+                && third.len() == 3
+                && code.bytes().all(|byte| byte.is_ascii_lowercase() || byte == b'-')
+    )
 }
 
 pub(super) fn classify_platform(

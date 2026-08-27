@@ -1,12 +1,10 @@
 #[cfg(target_os = "macos")]
 use super::analysis::meeting_chat_surface_is_visible;
-use super::analysis::{
-    candidate_chat_target, chat_scope_label, is_explicit_chat_input, is_zoom_chat_scope_node,
-};
+use super::analysis::{candidate_chat_target, is_explicit_chat_input, is_zoom_chat_scope_node};
 use super::{
     AxNode, BrowserMeetingRoot, MeetingPlatform, NativeMeetingRoot, browser_platform_from_url,
     is_platform_active_call_control, is_slack_huddle_composer, is_slack_thread_container_label,
-    node_has_positive_bounds, node_labels, slack_huddle_context,
+    node_has_positive_bounds, node_labels, slack_huddle_context, teams_has_active_call_evidence,
 };
 
 fn stable_capture_context_id(kind: &str, parts: &[String]) -> String {
@@ -52,6 +50,20 @@ fn common_tree_path(left: &[usize], right: &[usize]) -> Vec<usize> {
         .collect()
 }
 
+fn chat_scope_labels(node: &AxNode) -> impl Iterator<Item = String> + '_ {
+    [
+        node.title.as_deref(),
+        node.value.as_deref(),
+        node.description.as_deref(),
+        node.placeholder.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .map(str::to_ascii_lowercase)
+}
+
 fn is_chat_scope_container(node: &AxNode) -> bool {
     if !matches!(
         node.role.as_deref(),
@@ -65,23 +77,26 @@ fn is_chat_scope_container(node: &AxNode) -> bool {
         return false;
     }
 
-    let label = chat_scope_label(node);
-    matches!(
-        label.trim(),
-        "chat"
-            | "messages"
-            | "meeting chat"
-            | "in-call messages"
-            | "conversation"
-            | "message list"
-            | "chat list"
-            | "huddle chat"
-            | "chat with everyone"
-    ) || label.contains("meeting chat")
-        || label.contains("in-call messages")
-        || label.contains("chat messages")
-        || label.contains("messages panel")
-        || label.contains("huddle chat")
+    chat_scope_labels(node).any(|label| {
+        matches!(
+            label.as_str(),
+            "chat"
+                | "messages"
+                | "meeting chat"
+                | "in-call messages"
+                | "conversation"
+                | "message list"
+                | "chat message list"
+                | "chat list"
+                | "huddle chat"
+                | "chat with everyone"
+        ) || label.contains("meeting chat")
+            || label.contains("in-call messages")
+            || label.contains("chat messages")
+            || label.contains("chat with everyone")
+            || label.contains("messages panel")
+            || label.contains("huddle chat")
+    })
 }
 
 fn is_platform_chat_scope_container(platform: &MeetingPlatform, node: &AxNode) -> bool {
@@ -89,8 +104,11 @@ fn is_platform_chat_scope_container(platform: &MeetingPlatform, node: &AxNode) -
         return false;
     }
 
-    let label = chat_scope_label(node);
-    match platform {
+    is_platform_chat_scope_label(platform, node)
+}
+
+fn is_platform_chat_scope_label(platform: &MeetingPlatform, node: &AxNode) -> bool {
+    chat_scope_labels(node).any(|label| match platform {
         MeetingPlatform::GoogleMeet => {
             label == "in-call messages" || label.contains("in-call messages")
         }
@@ -98,7 +116,10 @@ fn is_platform_chat_scope_container(platform: &MeetingPlatform, node: &AxNode) -
             label == "meeting chat" || label.contains("meeting chat")
         }
         MeetingPlatform::Zoom => {
-            label == "chat" || label == "chat list" || label.contains("meeting chat")
+            label == "chat"
+                || label == "chat list"
+                || label == "chat message list"
+                || label.contains("meeting chat")
         }
         MeetingPlatform::Slack => {
             label == "huddle chat"
@@ -106,9 +127,13 @@ fn is_platform_chat_scope_container(platform: &MeetingPlatform, node: &AxNode) -
                 || label.contains("huddle thread")
                 || label.contains("huddle messages")
         }
-        MeetingPlatform::Webex => label == "chat with everyone" || label.contains("meeting chat"),
+        MeetingPlatform::Webex => {
+            label.contains("chat with everyone")
+                || label.contains("meeting chat")
+                || label.contains("chat tab list, everyone tab")
+        }
         MeetingPlatform::Discord | MeetingPlatform::Unknown => false,
-    }
+    })
 }
 
 fn is_chat_message_list(node: &AxNode) -> bool {
@@ -119,25 +144,52 @@ fn is_chat_message_list(node: &AxNode) -> bool {
         return false;
     }
 
-    let label = chat_scope_label(node);
-    label == "conversation"
-        || label == "message list"
-        || label == "chat list"
-        || label == "in-call messages"
-        || label.contains("chat messages")
-        || label.contains("meeting messages")
+    chat_scope_labels(node).any(|label| {
+        label == "conversation"
+            || label == "message list"
+            || label == "chat message list"
+            || label == "chat list"
+            || label == "in-call messages"
+            || label.contains("chat messages")
+            || label.contains("meeting messages")
+    })
 }
 
 fn is_platform_chat_message_list(platform: &MeetingPlatform, node: &AxNode) -> bool {
-    is_chat_message_list(node) && is_platform_chat_scope_container(platform, node)
+    (*platform == MeetingPlatform::Webex
+        && matches!(
+            node.role.as_deref(),
+            Some("AXGroup") | Some("AXList") | Some("AXScrollArea") | Some("AXTable")
+        )
+        && chat_scope_labels(node).any(|label| label.contains("thread conversation history")))
+        || (is_chat_message_list(node) && is_platform_chat_scope_container(platform, node))
 }
 
 pub(super) fn is_platform_chat_composer(platform: &MeetingPlatform, node: &AxNode) -> bool {
-    if !matches!(
+    is_platform_chat_composer_with_state(platform, node, true)
+}
+
+fn is_platform_chat_composer_with_state(
+    platform: &MeetingPlatform,
+    node: &AxNode,
+    require_enabled: bool,
+) -> bool {
+    let is_webex_linux_capture_composer = !require_enabled
+        && *platform == MeetingPlatform::Webex
+        && node.role.as_deref() == Some("AXStaticText")
+        && node.enabled != Some(false)
+        && node.title.as_deref().is_some_and(|title| {
+            let title = title.trim().to_ascii_lowercase();
+            title.starts_with("write a message to everyone")
+                && title.contains("press shift + enter for new line")
+        });
+    let is_editable_composer = matches!(
         node.role.as_deref(),
-        Some("AXTextArea") | Some("AXTextField")
-    ) || node.enabled == Some(false)
-        || !node.settable_value
+        Some("AXTextArea") | Some("AXTextField") | Some("AXComboBox")
+    ) && (!require_enabled || node.enabled != Some(false))
+        && node.settable_value;
+
+    if (!is_editable_composer && !is_webex_linux_capture_composer)
         || !node_has_positive_bounds(node)
     {
         return false;
@@ -152,13 +204,17 @@ pub(super) fn is_platform_chat_composer(platform: &MeetingPlatform, node: &AxNod
                 "type a message" | "type a new message" | "message everyone"
             ),
             MeetingPlatform::Zoom => {
-                label == "message everyone" || label.starts_with("message to ")
+                label == "message everyone"
+                    || label.starts_with("message to ")
+                    || label.starts_with("type message here")
             }
             MeetingPlatform::Slack => label.starts_with("message to "),
-            MeetingPlatform::Webex => matches!(
-                label.as_str(),
-                "type a message" | "send a message" | "message everyone"
-            ),
+            MeetingPlatform::Webex => {
+                matches!(
+                    label.as_str(),
+                    "type a message" | "send a message" | "message everyone"
+                ) || label.starts_with("write a message to ")
+            }
             MeetingPlatform::Discord | MeetingPlatform::Unknown => false,
         }
     })
@@ -204,6 +260,21 @@ pub(super) fn validated_chat_scope(
     platform: &MeetingPlatform,
     nodes: &[AxNode],
 ) -> Option<(Vec<usize>, Vec<usize>)> {
+    validated_chat_scope_with_state(platform, nodes, true)
+}
+
+pub(super) fn validated_chat_capture_scope(
+    platform: &MeetingPlatform,
+    nodes: &[AxNode],
+) -> Option<(Vec<usize>, Vec<usize>)> {
+    validated_chat_scope_with_state(platform, nodes, false)
+}
+
+fn validated_chat_scope_with_state(
+    platform: &MeetingPlatform,
+    nodes: &[AxNode],
+    require_enabled: bool,
+) -> Option<(Vec<usize>, Vec<usize>)> {
     if !matches!(
         platform,
         MeetingPlatform::Zoom
@@ -211,9 +282,10 @@ pub(super) fn validated_chat_scope(
             | MeetingPlatform::MicrosoftTeams
             | MeetingPlatform::Slack
             | MeetingPlatform::Webex
-    ) || !nodes
+    ) || !(nodes
         .iter()
         .any(|node| is_platform_active_call_control(platform, node))
+        || (*platform == MeetingPlatform::MicrosoftTeams && teams_has_active_call_evidence(nodes)))
     {
         return None;
     }
@@ -224,7 +296,7 @@ pub(super) fn validated_chat_scope(
 
     let mut composers = nodes
         .iter()
-        .filter(|node| is_platform_chat_composer(platform, node));
+        .filter(|node| is_platform_chat_composer_with_state(platform, node, require_enabled));
     let composer = composers.next()?;
     if composers.next().is_some() {
         return None;
@@ -240,6 +312,26 @@ pub(super) fn validated_chat_scope(
     explicit_scopes.sort_by_key(|node| std::cmp::Reverse(node.tree_path.len()));
     if let Some(scope) = explicit_scopes.first() {
         return Some((scope.tree_path.clone(), composer.tree_path.clone()));
+    }
+
+    let mut labeled_scope_paths = nodes
+        .iter()
+        .filter(|node| is_platform_chat_scope_label(platform, node))
+        .filter_map(|node| {
+            let scope_path = common_tree_path(&node.tree_path, &composer.tree_path);
+            let distance = node.tree_path.len() + composer.tree_path.len() - 2 * scope_path.len();
+            let max_distance = match (require_enabled, platform) {
+                (false, MeetingPlatform::MicrosoftTeams) => 14,
+                (false, MeetingPlatform::Webex) => 10,
+                _ => 6,
+            };
+            (!scope_path.is_empty() && distance <= max_distance).then_some(scope_path)
+        })
+        .collect::<Vec<_>>();
+    labeled_scope_paths.sort();
+    labeled_scope_paths.dedup();
+    if let [scope_path] = labeled_scope_paths.as_slice() {
+        return Some((scope_path.clone(), composer.tree_path.clone()));
     }
 
     let mut message_lists = nodes
@@ -296,10 +388,45 @@ fn canonical_browser_meeting_context(url: &str, platform: &MeetingPlatform) -> O
     Some(url.to_string())
 }
 
+fn browser_meeting_identity(root: &BrowserMeetingRoot) -> Option<String> {
+    if let Some(url) = root.web_area_url.as_deref()
+        && let Some(canonical) = canonical_browser_meeting_context(url, &root.platform)
+    {
+        return Some(canonical);
+    }
+
+    if root.platform == MeetingPlatform::GoogleMeet
+        && let Some(code) = root
+            .window_title
+            .as_deref()
+            .and_then(super::platform::google_meet_code_from_title)
+    {
+        return Some(format!("https://meet.google.com/{code}"));
+    }
+
+    #[cfg(any(test, target_os = "linux"))]
+    {
+        let title = root.window_title.as_deref()?;
+        let title_platforms = super::browser_title_platform_signals(title);
+        let has_active_call_control = root
+            .nodes
+            .iter()
+            .any(|node| super::is_browser_active_call_control(&root.platform, node));
+        if title_platforms.as_slice() == [root.platform.clone()] && has_active_call_control {
+            return Some(format!(
+                "atspi://{}/{}",
+                meeting_platform_context_kind(&root.platform),
+                normalized_context_part(title)
+            ));
+        }
+    }
+
+    None
+}
+
 pub(super) fn browser_capture_context_id(root: &BrowserMeetingRoot) -> Option<String> {
-    let (scope_path, composer_path) = validated_chat_scope(&root.platform, &root.nodes)?;
-    let canonical_url =
-        canonical_browser_meeting_context(root.web_area_url.as_deref()?, &root.platform)?;
+    let (scope_path, composer_path) = validated_chat_capture_scope(&root.platform, &root.nodes)?;
+    let canonical_url = browser_meeting_identity(root)?;
     let web_area_hash = root
         .nodes
         .iter()
@@ -330,7 +457,7 @@ pub(super) fn native_capture_context_id(
     platform: &MeetingPlatform,
     root: &NativeMeetingRoot,
 ) -> Option<String> {
-    let (scope_path, composer_path) = validated_chat_scope(platform, &root.nodes)?;
+    let (scope_path, composer_path) = validated_chat_capture_scope(platform, &root.nodes)?;
     let window_hash = root
         .nodes
         .iter()
@@ -399,7 +526,7 @@ pub(super) fn zoom_capture_context_id(root: &NativeMeetingRoot) -> Option<String
         .iter()
         .find(|node| {
             node.within_zoom_meeting_scope
-                && node.role.as_deref() == Some("AXTable")
+                && matches!(node.role.as_deref(), Some("AXTable") | Some("AXList"))
                 && is_zoom_chat_scope_node(node)
         })
         .and_then(|node| node.element_hash)

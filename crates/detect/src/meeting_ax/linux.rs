@@ -10,9 +10,7 @@ use atspi::{AccessibilityConnection, CoordType, ObjectRef, Role, State};
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
 
-use super::analysis::{
-    extract_chat_messages, find_participant_streams, meeting_chat_surface_is_visible,
-};
+use super::analysis::{extract_chat_messages, meeting_chat_surface_is_visible};
 use super::context::{
     browser_capture_context_id, is_platform_chat_composer, is_platform_send_button,
     native_capture_context_id, slack_capture_context_id, validated_chat_scope,
@@ -29,8 +27,9 @@ use super::types::{
     MeetingChatSendResult, MeetingPlatform, MeetingSurface, NativeMeetingRoot, UniqueMatch,
 };
 use super::{
-    MAX_NODES, MAX_TREE_DEPTH, MeetingAccessibilityInspection, browser_window_has_provider_signal,
-    chat_input_is_owned, inspection_label, is_slack_huddle_composer_in_thread,
+    BrowserMeetingSnapshot, MAX_NODES, MAX_TREE_DEPTH, MeetingAccessibilityInspection,
+    browser_meeting_root_from_snapshot, browser_window_has_provider_signal, chat_input_is_owned,
+    inspection_label, is_chat_priority_label, is_slack_huddle_composer_in_thread,
     is_slack_send_now_in_thread, is_slack_thread_control, native_meeting_window_is_validated,
     slack_huddle_context, slack_thread_container_path, unique_scope_for_count,
     validate_meeting_chat_message,
@@ -100,6 +99,12 @@ fn element_hash(bus_name: &str, path: &str) -> usize {
     bus_name.hash(&mut hasher);
     path.hash(&mut hasher);
     hasher.finish() as usize
+}
+
+fn normalized_atspi_text(value: String) -> Option<String> {
+    let value = value.replace('\u{fffc}', " ");
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 async fn unix_pid_for_name(connection: &zbus::Connection, name: &str) -> Option<u32> {
@@ -179,7 +184,7 @@ async fn snapshot_live_node(
     } else {
         None
     };
-    let value = text_value.filter(|value| !value.is_empty()).or_else(|| {
+    let value = text_value.and_then(normalized_atspi_text).or_else(|| {
         attributes
             .get("placeholder-text")
             .cloned()
@@ -302,10 +307,10 @@ async fn collect_nodes(
     };
     use super::{is_slack_huddle_scope_node, is_zoom_chat_scope_node, is_zoom_meeting_scope_node};
     let within_zoom_meeting_scope = ancestors.iter().any(|ancestor| {
-        ancestor
-            .labels
-            .iter()
-            .any(|label| label.to_ascii_lowercase().contains("zoom meeting"))
+        ancestor.labels.iter().any(|label| {
+            let label = label.to_ascii_lowercase();
+            label.contains("zoom meeting") || label.trim() == "meeting"
+        })
     }) || is_zoom_meeting_scope_node(&live.node);
     let within_zoom_chat_scope =
         live.node.within_zoom_chat_scope || is_zoom_chat_scope_node(&live.node);
@@ -332,14 +337,28 @@ async fn collect_nodes(
         ancestors.pop();
         return;
     };
+    let mut ranked = Vec::new();
     for (child_index, child) in children.into_iter().enumerate() {
+        let Some(child_proxy) = proxy_from_ref(connection, child).await else {
+            continue;
+        };
+        let name = child_proxy.name().await.unwrap_or_default();
+        ranked.push((
+            if is_chat_priority_label(&name) {
+                0_u8
+            } else {
+                1
+            },
+            child_index,
+            child_proxy,
+        ));
+    }
+    ranked.sort_by_key(|(rank, index, _)| (*rank, *index));
+    for (_, child_index, child_proxy) in ranked {
         if nodes.len() >= MAX_NODES {
             *truncated = true;
             break;
         }
-        let Some(child_proxy) = proxy_from_ref(connection, child).await else {
-            continue;
-        };
         path.push(child_index);
         Box::pin(collect_nodes(
             connection,
@@ -429,12 +448,15 @@ fn web_area_url(nodes: &[LiveNode]) -> Option<String> {
 }
 
 fn native_roots_from_windows(
-    windows: Vec<(Option<String>, Vec<LiveNode>)>,
+    windows: Vec<(Option<String>, Vec<LiveNode>, bool)>,
     platform: &MeetingPlatform,
 ) -> Vec<(NativeMeetingRoot, Vec<LiveNode>)> {
     windows
         .into_iter()
-        .filter_map(|(window_title, live)| {
+        .filter_map(|(window_title, live, complete)| {
+            if !complete {
+                return None;
+            }
             let nodes = ax_nodes(&live);
             native_meeting_window_is_validated(platform, &nodes).then_some((
                 NativeMeetingRoot {
@@ -448,11 +470,14 @@ fn native_roots_from_windows(
 }
 
 fn slack_roots_from_windows(
-    windows: Vec<(Option<String>, Vec<LiveNode>)>,
+    windows: Vec<(Option<String>, Vec<LiveNode>, bool)>,
 ) -> Vec<(String, String, Vec<LiveNode>)> {
     windows
         .into_iter()
-        .filter_map(|(_, live)| {
+        .filter_map(|(_, live, complete)| {
+            if !complete {
+                return None;
+            }
             let nodes = ax_nodes(&live);
             let (label, channel) = slack_huddle_context(&nodes)?;
             Some((channel, label, live))
@@ -461,18 +486,19 @@ fn slack_roots_from_windows(
 }
 
 fn browser_roots_from_windows(
-    windows: Vec<(Option<String>, Vec<LiveNode>)>,
+    windows: Vec<(Option<String>, Vec<LiveNode>, bool)>,
     warnings: &mut Vec<String>,
 ) -> (Vec<(BrowserMeetingRoot, Vec<LiveNode>)>, bool) {
     let mut roots = Vec::new();
     let mut poisoned = false;
-    for (window_title, live) in windows {
+    for (window_title, live, complete) in windows {
         let nodes = ax_nodes(&live);
         let url = web_area_url(&live);
-        if !nodes
+        let web_area = nodes
             .iter()
-            .any(|node| node.role.as_deref() == Some("AXWebArea"))
-        {
+            .find(|node| node.role.as_deref() == Some("AXWebArea"))
+            .cloned();
+        if web_area.is_none() {
             if browser_window_has_provider_signal(url.as_deref(), window_title.as_deref()) {
                 poisoned = true;
                 warnings.push(
@@ -482,26 +508,61 @@ fn browser_roots_from_windows(
             }
             continue;
         }
-        let platform = super::platform::classify_browser_context(
-            url.as_deref(),
-            window_title.as_deref(),
-            nodes
-                .iter()
-                .find(|node| node.role.as_deref() == Some("AXWebArea")),
-            &nodes,
-        );
-        if platform == MeetingPlatform::Unknown {
+        match browser_meeting_root_from_snapshot(
+            nodes,
+            complete,
+            url,
+            window_title,
+            web_area.as_ref(),
+        ) {
+            BrowserMeetingSnapshot::Accept(root) => roots.push((root, live)),
+            BrowserMeetingSnapshot::Unscoped => poisoned = true,
+            BrowserMeetingSnapshot::Exclude => {}
+        }
+    }
+    (roots, poisoned)
+}
+
+fn browser_mutation_roots_from_windows(
+    windows: Vec<(Option<String>, Vec<LiveNode>, bool)>,
+    warnings: &mut Vec<String>,
+) -> (Vec<(BrowserMeetingRoot, Vec<LiveNode>)>, bool) {
+    let mut roots = Vec::new();
+    let mut poisoned = false;
+    for (window_title, live, complete) in windows {
+        let nodes = ax_nodes(&live);
+        let url = web_area_url(&live);
+        let web_area = nodes
+            .iter()
+            .find(|node| node.role.as_deref() == Some("AXWebArea"))
+            .cloned();
+        if web_area.is_none() {
+            if browser_window_has_provider_signal(url.as_deref(), window_title.as_deref()) {
+                poisoned = true;
+                warnings.push(
+                    "a meeting-like browser window had no AT-SPI web area; browser send was excluded"
+                        .to_string(),
+                );
+            }
             continue;
         }
-        roots.push((
-            BrowserMeetingRoot {
-                platform,
-                window_title,
-                web_area_url: url,
-                nodes,
-            },
-            live,
-        ));
+        match browser_meeting_root_from_snapshot(
+            nodes,
+            complete,
+            url,
+            window_title,
+            web_area.as_ref(),
+        ) {
+            BrowserMeetingSnapshot::Accept(root) if complete => roots.push((root, live)),
+            BrowserMeetingSnapshot::Accept(_) | BrowserMeetingSnapshot::Unscoped => {
+                poisoned = true;
+                warnings.push(
+                    "refusing to send from an incomplete meeting browser AT-SPI snapshot"
+                        .to_string(),
+                );
+            }
+            BrowserMeetingSnapshot::Exclude => {}
+        }
     }
     (roots, poisoned)
 }
@@ -510,14 +571,12 @@ async fn collect_window_snapshots(
     connection: &AccessibilityConnection,
     app: &AccessibleProxy<'_>,
     warnings: &mut Vec<String>,
-) -> Vec<(Option<String>, Vec<LiveNode>)> {
+) -> Vec<(Option<String>, Vec<LiveNode>, bool)> {
     let mut snapshots = Vec::new();
     for window in application_windows(connection, app).await {
         let title = window.name().await.ok().filter(|name| !name.is_empty());
         let (nodes, complete) = collect_app_nodes(connection, &window, warnings).await;
-        if complete {
-            snapshots.push((title, nodes));
-        }
+        snapshots.push((title, nodes, complete));
     }
     snapshots
 }
@@ -536,19 +595,6 @@ fn inspection_from_nodes(
         classify_platform(&app.id, window_title.as_deref(), &nodes, bundle_platform)
     });
     let surface = classify_surface(&app.id, &platform);
-    let participant_streams = find_participant_streams(&platform, &surface, &nodes);
-    let mut active_speaker_names = std::collections::HashSet::new();
-    let active_speakers = participant_streams
-        .iter()
-        .filter(|stream| stream.is_active_speaker)
-        .filter_map(|stream| {
-            stream
-                .participant_name
-                .clone()
-                .or_else(|| stream.label.clone())
-        })
-        .filter(|name| active_speaker_names.insert(name.trim().to_ascii_lowercase()))
-        .collect();
     MeetingAccessibilityInspection {
         app,
         pid,
@@ -556,8 +602,6 @@ fn inspection_from_nodes(
         surface,
         accessibility_trusted,
         window_title,
-        participant_streams,
-        active_speakers,
         warnings,
     }
 }
@@ -1071,7 +1115,7 @@ pub(super) fn send_meeting_chat_message(
             };
             let windows = collect_window_snapshots(&connection, &ax_app, &mut warnings).await;
             if is_browser_bundle(&scoped_bundle_id) {
-                let (roots, poisoned) = browser_roots_from_windows(windows, &mut warnings);
+                let (roots, poisoned) = browser_mutation_roots_from_windows(windows, &mut warnings);
                 if poisoned || roots.len() > 1 {
                     warnings.push(format!(
                         "refusing to send because the browser exposed {} meeting chat surfaces",
@@ -1351,4 +1395,106 @@ pub(super) fn capture_meeting_chat_messages(bundle_ids: Vec<String>) -> MeetingC
             warnings,
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn object_replacement_text_does_not_pollute_accessible_labels() {
+        assert_eq!(normalized_atspi_text("\u{fffc}".to_string()), None);
+        assert_eq!(
+            normalized_atspi_text("Chat Message List\u{fffc}".to_string()),
+            Some("Chat Message List".to_string())
+        );
+    }
+
+    fn live_web_area(index: usize, url: &str, title: &str) -> LiveNode {
+        LiveNode {
+            node: AxNode {
+                index,
+                tree_path: vec![index],
+                element_hash: Some(index),
+                role: Some("AXWebArea".to_string()),
+                identifier: Some(url.to_string()),
+                title: Some(title.to_string()),
+                value: None,
+                description: None,
+                placeholder: None,
+                enabled: Some(true),
+                settable_value: false,
+                bounds: Some(AxRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 1024.0,
+                    height: 768.0,
+                }),
+                text: title.to_string(),
+                within_zoom_meeting_scope: false,
+                within_zoom_chat_scope: false,
+                within_slack_huddle_scope: false,
+            },
+            ancestors: Vec::new(),
+            bus_name: "org.test.Browser".to_string(),
+            path: format!("/org/test/{index}"),
+        }
+    }
+
+    #[test]
+    fn browser_mutation_rejects_incomplete_window_snapshots() {
+        let mut warnings = Vec::new();
+        let (roots, poisoned) = browser_mutation_roots_from_windows(
+            vec![(
+                Some("Meet - abc-defg-hij".to_string()),
+                vec![live_web_area(
+                    0,
+                    "https://meet.google.com/abc-defg-hij",
+                    "Meet - abc-defg-hij",
+                )],
+                false,
+            )],
+            &mut warnings,
+        );
+
+        assert!(roots.is_empty());
+        assert!(poisoned);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("refusing to send"))
+        );
+    }
+
+    #[test]
+    fn browser_mutation_ignores_incomplete_unrelated_window_snapshots() {
+        let mut warnings = Vec::new();
+        let (roots, poisoned) = browser_mutation_roots_from_windows(
+            vec![
+                (
+                    Some("Inbox - Gmail".to_string()),
+                    vec![live_web_area(
+                        0,
+                        "https://mail.google.com/mail/u/0/",
+                        "Inbox",
+                    )],
+                    false,
+                ),
+                (
+                    Some("Meet - abc-defg-hij".to_string()),
+                    vec![live_web_area(
+                        1,
+                        "https://meet.google.com/abc-defg-hij",
+                        "Meet - abc-defg-hij",
+                    )],
+                    true,
+                ),
+            ],
+            &mut warnings,
+        );
+
+        assert_eq!(roots.len(), 1);
+        assert!(!poisoned);
+        assert!(warnings.is_empty());
+    }
 }

@@ -1,61 +1,9 @@
 use std::collections::HashMap;
 
 use super::{
-    AxNode, MIN_VIDEO_AREA, MeetingCapturedChatMessage, MeetingChatDirection, MeetingChatTarget,
-    MeetingParticipantStream, MeetingPlatform, MeetingSurface, node_labels, path_is_ancestor,
-    validated_chat_scope,
+    AxNode, MeetingCapturedChatMessage, MeetingChatDirection, MeetingChatTarget, MeetingPlatform,
+    MeetingSurface, node_labels, path_is_ancestor, validated_chat_capture_scope,
 };
-
-pub(super) fn find_participant_streams(
-    platform: &MeetingPlatform,
-    surface: &MeetingSurface,
-    nodes: &[AxNode],
-) -> Vec<MeetingParticipantStream> {
-    if *platform == MeetingPlatform::Unknown {
-        return Vec::new();
-    }
-
-    let mut streams = nodes
-        .iter()
-        .filter_map(|node| candidate_stream(platform, surface, node).map(|stream| (stream, node)))
-        .collect::<Vec<_>>();
-
-    streams.sort_by(|a, b| {
-        b.0.is_active_speaker
-            .cmp(&a.0.is_active_speaker)
-            .then_with(|| b.0.confidence.total_cmp(&a.0.confidence))
-    });
-    let mut retained_nodes: Vec<(String, &AxNode)> = Vec::new();
-    streams.retain(|(stream, node)| {
-        let duplicate = stream.participant_name.as_deref().is_some_and(|name| {
-            retained_nodes.iter().any(|(retained_name, retained)| {
-                retained_name.eq_ignore_ascii_case(name)
-                    && same_participant_ax_identity(retained, node)
-            })
-        });
-        if !duplicate && let Some(name) = stream.participant_name.clone() {
-            retained_nodes.push((name, node));
-        }
-        !duplicate
-    });
-    let retained_limit = streams
-        .iter()
-        .filter(|(stream, _)| stream.is_active_speaker)
-        .count()
-        .max(24);
-    streams.truncate(retained_limit);
-    streams.into_iter().map(|(stream, _)| stream).collect()
-}
-
-fn same_participant_ax_identity(left: &AxNode, right: &AxNode) -> bool {
-    left.element_hash
-        .zip(right.element_hash)
-        .is_some_and(|(left, right)| left == right)
-        || (!left.tree_path.is_empty()
-            && !right.tree_path.is_empty()
-            && (left.tree_path.starts_with(&right.tree_path)
-                || right.tree_path.starts_with(&left.tree_path)))
-}
 
 pub(super) fn is_zoom_meeting_evidence(node: &AxNode) -> bool {
     zoom_meeting_evidence_label(node).is_some()
@@ -69,7 +17,7 @@ fn zoom_meeting_evidence_label(node: &AxNode) -> Option<&str> {
         label.contains("computer audio") || label.contains("no audio connected")
     });
 
-    if matches!(role, "AXGroup" | "AXCell")
+    if matches!(role, "AXGroup" | "AXCell" | "AXTabGroup")
         && has_audio_state
         && let Some(label) = labels.iter().copied().find(|label| {
             let label = label.trim();
@@ -82,7 +30,7 @@ fn zoom_meeting_evidence_label(node: &AxNode) -> Option<&str> {
                         && (state.contains("computer audio")
                             || state.contains("no audio connected"))
                 });
-            is_video_render || lower == "video tile"
+            is_video_render || lower == "video tile" || zoom_audio_state_label_has_name(label)
         })
     {
         return Some(label);
@@ -101,217 +49,15 @@ fn zoom_meeting_evidence_label(node: &AxNode) -> Option<&str> {
 
     None
 }
-
-fn zoom_participant_evidence_label(node: &AxNode) -> Option<&str> {
-    let role = node.role.as_deref()?;
-    if matches!(role, "AXGroup" | "AXCell" | "AXRow")
-        && let Some(label) = node_labels(node).find(|label| has_explicit_speaker_state(label))
-    {
-        return Some(label);
-    }
-
-    zoom_meeting_evidence_label(node)
-}
-
-fn slack_participant_evidence_label(node: &AxNode) -> Option<&str> {
-    if node.role.as_deref() != Some("AXCell") {
-        return None;
-    }
-
-    node_labels(node).find(|label| {
-        let label = label.trim();
-        let lower = label.to_ascii_lowercase();
-        lower.starts_with("view ")
-            && lower.ends_with("'s profile")
-            && !label[5..label.len() - "'s profile".len()].trim().is_empty()
-    })
-}
-
-fn explicit_web_speaker_evidence_label(node: &AxNode) -> Option<&str> {
-    if !matches!(
-        node.role.as_deref(),
-        Some("AXGroup") | Some("AXCell") | Some("AXRow")
-    ) {
-        return None;
-    }
-
-    node_labels(node).find(|label| has_explicit_speaker_state(label))
-}
-
-fn participant_evidence_label<'a>(
-    platform: &MeetingPlatform,
-    surface: &MeetingSurface,
-    node: &'a AxNode,
-) -> Option<&'a str> {
-    match (platform, surface) {
-        (MeetingPlatform::Zoom, MeetingSurface::Native) => zoom_participant_evidence_label(node),
-        (MeetingPlatform::Zoom, MeetingSurface::Web) => zoom_participant_evidence_label(node)
-            .or_else(|| explicit_web_speaker_evidence_label(node)),
-        (MeetingPlatform::Slack, MeetingSurface::Native) => slack_participant_evidence_label(node),
-        (
-            MeetingPlatform::GoogleMeet
-            | MeetingPlatform::MicrosoftTeams
-            | MeetingPlatform::Slack
-            | MeetingPlatform::Webex,
-            MeetingSurface::Web,
-        ) => explicit_web_speaker_evidence_label(node),
-        _ => None,
-    }
-}
-
-pub(super) fn candidate_stream(
-    platform: &MeetingPlatform,
-    surface: &MeetingSurface,
-    node: &AxNode,
-) -> Option<MeetingParticipantStream> {
-    let role = node.role.as_deref().unwrap_or_default();
-    let text = node.text.as_str();
-    let evidence_label = participant_evidence_label(platform, surface, node)?;
-    let area = node
-        .bounds
-        .as_ref()
-        .map(|r| r.width * r.height)
-        .unwrap_or(0.0);
-    let mut signals = Vec::new();
-    let mut confidence = 0.55;
-
-    if role == "AXGroup" && area >= MIN_VIDEO_AREA {
-        confidence += 0.15;
-        signals.push("large-group".to_string());
-    }
-    if evidence_label
-        .to_ascii_lowercase()
-        .starts_with("video render ")
-        || evidence_label.trim().eq_ignore_ascii_case("video tile")
-    {
-        signals.push("video-label".to_string());
-    } else {
-        signals.push("participant-row-label".to_string());
-    }
-    if has_explicit_speaker_state(evidence_label) {
-        confidence += 0.25;
-        signals.push("speaker-state-label".to_string());
-    }
-    if text.contains("computer audio") || text.contains("no audio connected") {
-        confidence += 0.15;
-        signals.push("audio-state-label".to_string());
-    }
-    if area >= MIN_VIDEO_AREA {
-        confidence += 0.15;
-        signals.push("video-sized-bounds".to_string());
-    }
-
-    let label = Some(evidence_label.to_string());
-    let participant_name = participant_name_from_evidence(platform, evidence_label);
-    let is_active_speaker = signals.iter().any(|signal| signal == "speaker-state-label");
-
-    Some(MeetingParticipantStream {
-        id: node.element_hash.map_or_else(
-            || format!("ax-node-{}", node.index),
-            |hash| format!("ax-element-{hash:x}"),
-        ),
-        platform: platform.clone(),
-        surface: surface.clone(),
-        participant_name,
-        label,
-        bounds: node.bounds.clone(),
-        confidence,
-        is_active_speaker,
-        signals,
-    })
-}
-
-pub(super) fn participant_name_from_evidence(
-    platform: &MeetingPlatform,
-    evidence_label: &str,
-) -> Option<String> {
-    let label = evidence_label.trim();
+fn zoom_audio_state_label_has_name(label: &str) -> bool {
     let lower = label.to_ascii_lowercase();
-    match platform {
-        MeetingPlatform::Zoom => {
-            if lower == "video tile" {
-                return None;
-            }
-
-            if let Some(name) = participant_name_from_speaker_label(label) {
-                return Some(name);
-            }
-
-            if lower.starts_with("video render ") {
-                return label["Video render ".len()..]
-                    .split(',')
-                    .next()
-                    .map(str::trim)
-                    .filter(|name| !name.is_empty())
-                    .map(str::to_string);
-            }
-
-            let end = label
-                .find('(')
-                .or_else(|| lower.find("participant id:"))
-                .unwrap_or(label.len());
-            let name = label[..end].trim().trim_end_matches(',').trim();
-            (!name.is_empty()).then(|| name.to_string())
-        }
-        MeetingPlatform::Slack if lower.starts_with("view ") && lower.ends_with("'s profile") => {
-            Some(
-                label["View ".len()..label.len() - "'s profile".len()]
-                    .trim()
-                    .to_string(),
-            )
-        }
-        MeetingPlatform::GoogleMeet
-        | MeetingPlatform::MicrosoftTeams
-        | MeetingPlatform::Slack
-        | MeetingPlatform::Webex => participant_name_from_speaker_label(label),
-        MeetingPlatform::Discord | MeetingPlatform::Unknown => None,
-    }
+    [", computer audio", ", no audio connected"]
+        .into_iter()
+        .find_map(|marker| lower.find(marker).map(|index| label[..index].trim()))
+        .is_some_and(is_plausible_zoom_scope_name)
 }
 
-fn participant_name_from_speaker_label(label: &str) -> Option<String> {
-    let label = label.trim();
-    let lower = label.to_ascii_lowercase();
-    let label = if lower.ends_with(" (you)") {
-        &label[..label.len() - " (you)".len()]
-    } else {
-        label
-    };
-    let lower = label.to_ascii_lowercase();
-    let name = if lower.starts_with("active speaker: ") {
-        &label["active speaker: ".len()..]
-    } else if lower.ends_with(" is speaking") {
-        &label[..label.len() - " is speaking".len()]
-    } else if let Some(index) = explicit_speaker_marker_index(&lower, ", active speaker") {
-        &label[..index]
-    } else if let Some(index) = explicit_speaker_marker_index(&lower, ", speaking") {
-        &label[..index]
-    } else {
-        return None;
-    };
-
-    let name = name
-        .trim()
-        .trim_end_matches(" (You)")
-        .trim_end_matches(" (you)")
-        .trim();
-    let name = if name.to_ascii_lowercase().starts_with("video render ") {
-        name["video render ".len()..]
-            .split(',')
-            .next()
-            .unwrap_or_default()
-            .trim()
-    } else {
-        name
-    };
-    let is_false_state = matches!(
-        name.to_ascii_lowercase().as_str(),
-        "false" | "none" | "off" | "no"
-    );
-    (!name.is_empty() && !is_false_state && is_plausible_participant_name(name))
-        .then(|| name.to_string())
-}
-
-fn is_plausible_participant_name(name: &str) -> bool {
+fn is_plausible_zoom_scope_name(name: &str) -> bool {
     let name = name.trim();
     if name.is_empty()
         || name.chars().count() > 80
@@ -354,23 +100,13 @@ fn is_plausible_participant_name(name: &str) -> bool {
             .any(|word| GENERIC_SUBJECTS.contains(&word.as_str()))
 }
 
-fn explicit_speaker_marker_index(label: &str, marker: &str) -> Option<usize> {
-    let index = label.find(marker)?;
-    let suffix = &label[index + marker.len()..];
-    (suffix.is_empty() || suffix == " (you)").then_some(index)
-}
-
-fn has_explicit_speaker_state(label: &str) -> bool {
-    participant_name_from_speaker_label(label).is_some()
-}
-
 pub(super) fn is_zoom_meeting_scope_node(node: &AxNode) -> bool {
     if node.role.as_deref() != Some("AXWindow") {
         return false;
     }
 
     let title = node.title.as_deref().unwrap_or_default().to_lowercase();
-    title.contains("zoom meeting")
+    title.contains("zoom meeting") || title.trim() == "meeting"
 }
 
 pub(super) fn is_zoom_chat_scope_node(node: &AxNode) -> bool {
@@ -378,7 +114,13 @@ pub(super) fn is_zoom_chat_scope_node(node: &AxNode) -> bool {
         return true;
     }
 
-    node.role.as_deref() == Some("AXTable") && chat_scope_label(node).contains("chat list")
+    matches!(node.role.as_deref(), Some("AXTable") | Some("AXList"))
+        && node_labels(node).any(|label| {
+            matches!(
+                label.trim().to_ascii_lowercase().as_str(),
+                "chat list" | "chat history"
+            )
+        })
 }
 
 pub(super) fn slack_huddle_is_active(nodes: &[AxNode]) -> bool {
@@ -419,6 +161,8 @@ pub(super) fn chat_scope_label(node: &AxNode) -> String {
     ]
     .into_iter()
     .flatten()
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
     .collect::<Vec<_>>()
     .join(" ")
     .to_lowercase()
@@ -451,6 +195,7 @@ pub(super) fn is_explicit_chat_input(node: &AxNode) -> bool {
     label.contains("send a message")
         || label.contains("message everyone")
         || label.contains("type a message")
+        || label.contains("type message here")
         || label.contains("meeting chat")
 }
 
@@ -481,7 +226,7 @@ pub(super) fn extract_chat_messages(
             MeetingPlatform::MicrosoftTeams | MeetingPlatform::Webex
         );
     let generic_scope_path = if requires_generic_scope {
-        let Some((scope_path, _)) = validated_chat_scope(platform, nodes) else {
+        let Some((scope_path, _)) = validated_chat_capture_scope(platform, nodes) else {
             return Vec::new();
         };
         Some(scope_path)
@@ -524,6 +269,23 @@ pub(super) fn extract_chat_messages(
             continue;
         };
         parsed_nodes.push((node, parsed));
+    }
+
+    if *platform == MeetingPlatform::GoogleMeet
+        && let Some(scope_path) = generic_scope_path.as_deref()
+    {
+        parsed_nodes.extend(extract_google_meet_structured_messages(nodes, scope_path));
+        parsed_nodes.extend(extract_google_meet_timestamp_sibling_messages(
+            nodes, scope_path,
+        ));
+    }
+    if *platform == MeetingPlatform::Webex
+        && let Some(scope_path) = generic_scope_path.as_deref()
+    {
+        parsed_nodes.extend(extract_webex_structured_messages(nodes, scope_path));
+    }
+    if *platform == MeetingPlatform::Zoom && *surface == MeetingSurface::Native {
+        parsed_nodes.extend(extract_zoom_title_description_messages(nodes));
     }
 
     if generic_scope_path.is_some() {
@@ -573,7 +335,10 @@ pub(super) fn extract_chat_messages(
             id: format!("ax-chat-{signature}|{source_identity}"),
             platform: platform.clone(),
             surface: surface.clone(),
-            direction: meeting_chat_direction(platform, parsed.sender.as_deref()),
+            direction: parsed
+                .direction
+                .clone()
+                .or_else(|| meeting_chat_direction(platform, parsed.sender.as_deref())),
             sender: parsed.sender,
             timestamp: parsed.timestamp,
             links: extract_links(&parsed.text),
@@ -587,11 +352,380 @@ pub(super) fn extract_chat_messages(
     messages
 }
 
+fn extract_zoom_title_description_messages(nodes: &[AxNode]) -> Vec<(&AxNode, ParsedChatMessage)> {
+    let chat_history_paths = nodes
+        .iter()
+        .filter(|node| node.within_zoom_meeting_scope && is_zoom_chat_scope_node(node))
+        .map(|node| node.tree_path.clone())
+        .collect::<Vec<_>>();
+    let [chat_history_path] = chat_history_paths.as_slice() else {
+        return Vec::new();
+    };
+
+    let mut messages = nodes
+        .iter()
+        .filter(|node| {
+            node.within_zoom_meeting_scope
+                && path_is_ancestor(chat_history_path, &node.tree_path)
+                && matches!(
+                    node.role.as_deref(),
+                    Some("AXGroup") | Some("AXCell") | Some("AXRow")
+                )
+        })
+        .filter_map(|node| {
+            let (sender, timestamp) = split_sender_time(node.title.as_deref()?)?;
+            let text = normalize_chat_text(node.description.as_deref()?);
+            (looks_like_chat_sender(sender) && !text.is_empty() && !is_chat_chrome_text(&text))
+                .then(|| {
+                    (
+                        node,
+                        ParsedChatMessage {
+                            sender: Some(sender.to_string()),
+                            timestamp: Some(timestamp.to_string()),
+                            direction: None,
+                            text,
+                        },
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+    let message_paths = messages
+        .iter()
+        .map(|(node, _)| node.tree_path.clone())
+        .collect::<Vec<_>>();
+    messages.retain(|(node, _)| {
+        !message_paths
+            .iter()
+            .any(|path| path_is_ancestor(&node.tree_path, path))
+    });
+    messages
+}
+
+fn extract_google_meet_structured_messages<'a>(
+    nodes: &'a [AxNode],
+    scope_path: &[usize],
+) -> Vec<(&'a AxNode, ParsedChatMessage)> {
+    let mut branches = Vec::<Vec<usize>>::new();
+    for node in nodes.iter().filter(|node| {
+        node.tree_path.starts_with(scope_path) && node.tree_path.len() > scope_path.len()
+    }) {
+        let branch = node.tree_path[..scope_path.len() + 1].to_vec();
+        if !branches.contains(&branch) {
+            branches.push(branch);
+        }
+    }
+    branches.sort();
+
+    let mut messages = Vec::new();
+    for branch in branches {
+        let branch_nodes = nodes
+            .iter()
+            .filter(|node| node.tree_path.starts_with(&branch))
+            .collect::<Vec<_>>();
+        let mut senders = Vec::<(&AxNode, String, Option<String>)>::new();
+        for node in branch_nodes.iter().filter(|node| {
+            node.tree_path.len() <= branch.len() + 3
+                && matches!(node.role.as_deref(), Some("AXStaticText") | Some("AXText"))
+        }) {
+            let Some(label) = chat_message_text(node) else {
+                continue;
+            };
+            let (sender, timestamp) = split_sender_time(&label)
+                .map(|(sender, time)| (sender, Some(time.to_string())))
+                .unwrap_or((label.as_str(), None));
+            if !looks_like_chat_sender(sender)
+                || senders.iter().any(|(_, existing_sender, existing_time)| {
+                    existing_sender == sender && existing_time == &timestamp
+                })
+            {
+                continue;
+            }
+            senders.push((node, sender.to_string(), timestamp));
+        }
+        let [(sender_node, sender, timestamp)] = senders.as_slice() else {
+            continue;
+        };
+
+        let mut fragment_groups = Vec::<(Vec<usize>, Vec<(&AxNode, String)>)>::new();
+        for node in branch_nodes.into_iter().filter(|node| {
+            node.index > sender_node.index
+                && node.tree_path.len() > branch.len()
+                && matches!(
+                    node.role.as_deref(),
+                    Some("AXStaticText") | Some("AXText") | Some("AXLink")
+                )
+        }) {
+            let Some(fragment) = google_meet_chat_fragment(node) else {
+                continue;
+            };
+            if fragment == *sender || looks_like_time(&fragment) || is_chat_chrome_text(&fragment) {
+                continue;
+            }
+            let group_path = node.tree_path[..branch.len() + 1].to_vec();
+            if let Some((_, fragments)) = fragment_groups
+                .iter_mut()
+                .find(|(path, _)| path == &group_path)
+            {
+                if !fragments.iter().any(|(_, existing)| existing == &fragment) {
+                    fragments.push((node, fragment));
+                }
+            } else {
+                fragment_groups.push((group_path, vec![(node, fragment)]));
+            }
+        }
+
+        for (_, fragments) in fragment_groups {
+            let Some(source) = fragments.first().map(|(node, _)| *node) else {
+                continue;
+            };
+            let text = fragments
+                .into_iter()
+                .map(|(_, fragment)| fragment)
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !text.is_empty() {
+                messages.push((
+                    source,
+                    ParsedChatMessage {
+                        sender: Some(sender.clone()),
+                        timestamp: timestamp.clone(),
+                        direction: None,
+                        text,
+                    },
+                ));
+            }
+        }
+    }
+    messages
+}
+
+fn google_meet_chat_fragment(node: &AxNode) -> Option<String> {
+    if node.role.as_deref() == Some("AXLink") {
+        return [
+            node.title.as_deref(),
+            node.description.as_deref(),
+            node.value.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(normalize_chat_text)
+        .find(|value| value.starts_with("http://") || value.starts_with("https://"));
+    }
+
+    let fragment = chat_message_text(node)?;
+    (!matches!(
+        fragment.to_ascii_lowercase().as_str(),
+        "hover over a message to pin it" | "pin message"
+    ))
+    .then_some(fragment)
+}
+
+fn extract_google_meet_timestamp_sibling_messages<'a>(
+    nodes: &'a [AxNode],
+    scope_path: &[usize],
+) -> Vec<(&'a AxNode, ParsedChatMessage)> {
+    nodes
+        .iter()
+        .filter_map(|timestamp_node| {
+            if !timestamp_node.tree_path.starts_with(scope_path)
+                || timestamp_node.tree_path.len() < scope_path.len() + 3
+                || !matches!(
+                    timestamp_node.role.as_deref(),
+                    Some("AXStaticText") | Some("AXText")
+                )
+            {
+                return None;
+            }
+
+            let timestamp = chat_message_text(timestamp_node)?;
+            if !looks_like_time(&timestamp) {
+                return None;
+            }
+
+            let leaf_index = timestamp_node.tree_path.len() - 1;
+            if timestamp_node.tree_path[leaf_index] != 0 {
+                return None;
+            }
+            let slot_index = leaf_index - 1;
+            let slot = timestamp_node.tree_path[slot_index];
+            let parent_path = &timestamp_node.tree_path[..slot_index];
+
+            let mut content_path = parent_path.to_vec();
+            content_path.push(slot.checked_add(1)?);
+            let fragments = nodes
+                .iter()
+                .filter(|node| {
+                    node.tree_path.starts_with(&content_path)
+                        && matches!(
+                            node.role.as_deref(),
+                            Some("AXStaticText") | Some("AXText") | Some("AXLink")
+                        )
+                })
+                .filter_map(|node| google_meet_chat_fragment(node).map(|fragment| (node, fragment)))
+                .fold(
+                    Vec::<(&AxNode, String)>::new(),
+                    |mut fragments, fragment| {
+                        if !fragments
+                            .iter()
+                            .any(|(_, existing)| existing == &fragment.1)
+                        {
+                            fragments.push(fragment);
+                        }
+                        fragments
+                    },
+                );
+            let source = fragments.first()?.0;
+            let text = fragments
+                .into_iter()
+                .map(|(_, fragment)| fragment)
+                .collect::<Vec<_>>()
+                .join(" ");
+            if text.is_empty() {
+                return None;
+            }
+
+            let sender = slot.checked_sub(1).and_then(|sender_slot| {
+                let sender_is_previous_message_content =
+                    sender_slot.checked_sub(1).is_some_and(|timestamp_slot| {
+                        let mut timestamp_path = parent_path.to_vec();
+                        timestamp_path.push(timestamp_slot);
+                        nodes.iter().any(|node| {
+                            node.tree_path.starts_with(&timestamp_path)
+                                && matches!(
+                                    node.role.as_deref(),
+                                    Some("AXStaticText") | Some("AXText")
+                                )
+                                && chat_message_text(node)
+                                    .is_some_and(|text| looks_like_time(&text))
+                        })
+                    });
+                if sender_is_previous_message_content {
+                    return None;
+                }
+
+                let mut sender_path = parent_path.to_vec();
+                sender_path.push(sender_slot);
+                let mut labels = nodes
+                    .iter()
+                    .filter(|node| {
+                        node.tree_path.starts_with(&sender_path)
+                            && matches!(node.role.as_deref(), Some("AXStaticText") | Some("AXText"))
+                    })
+                    .filter_map(chat_message_text)
+                    .filter(|label| looks_like_chat_sender(label));
+                let sender = labels.next()?;
+                labels.next().is_none().then_some(sender)
+            });
+
+            Some((
+                source,
+                ParsedChatMessage {
+                    sender,
+                    timestamp: Some(timestamp),
+                    direction: None,
+                    text,
+                },
+            ))
+        })
+        .collect()
+}
+
+fn extract_webex_structured_messages<'a>(
+    nodes: &'a [AxNode],
+    scope_path: &[usize],
+) -> Vec<(&'a AxNode, ParsedChatMessage)> {
+    nodes
+        .iter()
+        .filter(|node| {
+            (matches!(node.role.as_deref(), Some("AXRow") | Some("AXCell"))
+                || (node.role.as_deref() == Some("AXGroup")
+                    && node_labels(node).any(|label| {
+                        let label = label.to_ascii_lowercase();
+                        label.contains(", sent by ")
+                            && label.contains("press enter key to enter the group")
+                    })))
+                && node.tree_path.starts_with(scope_path)
+        })
+        .filter_map(|row| {
+            let descendants = nodes
+                .iter()
+                .filter(|node| path_is_ancestor(&row.tree_path, &node.tree_path))
+                .collect::<Vec<_>>();
+            let mut fragments = descendants
+                .iter()
+                .filter(|node| {
+                    let is_message_text = node
+                        .title
+                        .as_deref()
+                        .is_some_and(|title| title.trim().eq_ignore_ascii_case("message text"));
+                    (node.role.as_deref() == Some("AXTextArea")
+                        && (!node.settable_value || is_message_text))
+                        || (node.role.as_deref() == Some("AXStaticText") && is_message_text)
+                })
+                .filter_map(|node| {
+                    let text = [
+                        node.value.as_deref(),
+                        node.title.as_deref(),
+                        node.description.as_deref(),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .map(normalize_chat_text)
+                    .find(|text| !text.is_empty() && !is_chat_chrome_text(text))?;
+                    Some((*node, text))
+                });
+            let (source, first) = fragments.next()?;
+            let text = std::iter::once(first)
+                .chain(fragments.map(|(_, fragment)| fragment))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let descendant_metadata = descendants
+                .iter()
+                .flat_map(|node| node_labels(node))
+                .filter_map(|label| {
+                    let normalized = normalize_chat_text(label);
+                    let (sender, timestamp) = split_sender_time(&normalized)?;
+                    looks_like_chat_sender(sender)
+                        .then_some((sender.to_string(), timestamp.to_string()))
+                })
+                .collect::<Vec<_>>();
+            let (sender, timestamp) = if let [(sender, timestamp)] = descendant_metadata.as_slice()
+            {
+                (sender.clone(), timestamp.clone())
+            } else {
+                node_labels(row).find_map(|label| {
+                    let normalized = normalize_chat_text(label);
+                    let metadata = normalized.strip_prefix(&text)?.trim_start_matches(", ");
+                    let parts = metadata.split(", ").map(str::trim).collect::<Vec<_>>();
+                    parts.windows(2).find_map(|parts| {
+                        let sender = parts[0].strip_prefix("sent by ").unwrap_or(parts[0]);
+                        (looks_like_chat_sender(sender) && looks_like_time(parts[1]))
+                            .then(|| (sender.to_string(), parts[1].to_string()))
+                    })
+                })?
+            };
+
+            Some((
+                source,
+                ParsedChatMessage {
+                    sender: Some(sender.clone()),
+                    timestamp: Some(timestamp),
+                    direction: meeting_chat_direction(
+                        &MeetingPlatform::Webex,
+                        Some(sender.as_str()),
+                    ),
+                    text,
+                },
+            ))
+        })
+        .collect()
+}
+
 pub(super) fn meeting_chat_direction(
     platform: &MeetingPlatform,
     sender: Option<&str>,
 ) -> Option<MeetingChatDirection> {
-    if *platform != MeetingPlatform::Zoom {
+    if !matches!(platform, MeetingPlatform::Zoom | MeetingPlatform::Webex) {
         return None;
     }
 
@@ -608,6 +742,7 @@ pub(super) fn meeting_chat_direction(
 pub(super) struct ParsedChatMessage {
     pub(super) sender: Option<String>,
     pub(super) timestamp: Option<String>,
+    pub(super) direction: Option<MeetingChatDirection>,
     pub(super) text: String,
 }
 
@@ -625,11 +760,14 @@ fn chat_message_text(node: &AxNode) -> Option<String> {
         return None;
     }
 
-    let value = node
-        .value
-        .as_deref()
-        .or(node.title.as_deref())
-        .or(node.description.as_deref())?;
+    let value = [
+        node.value.as_deref(),
+        node.title.as_deref(),
+        node.description.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|value| !value.trim().is_empty())?;
     let text = normalize_chat_text(value);
     if text.len() < 2 || is_chat_chrome_text(&text) {
         return None;
@@ -649,11 +787,32 @@ pub(super) fn parse_chat_message(
         MeetingPlatform::Slack => {
             parse_slack_chat_message(raw_text).or_else(|| parse_web_chat_message(raw_text))
         }
-        MeetingPlatform::GoogleMeet | MeetingPlatform::MicrosoftTeams | MeetingPlatform::Webex => {
-            parse_web_chat_message(raw_text)
+        MeetingPlatform::MicrosoftTeams => parse_teams_accessibility_description(raw_text)
+            .or_else(|| parse_web_chat_message(raw_text)),
+        MeetingPlatform::GoogleMeet => parse_web_chat_message(raw_text),
+        MeetingPlatform::Webex => {
+            parse_webex_browser_message(raw_text).or_else(|| parse_web_chat_message(raw_text))
         }
         MeetingPlatform::Discord | MeetingPlatform::Unknown => None,
     }
+}
+
+fn parse_webex_browser_message(raw_text: &str) -> Option<ParsedChatMessage> {
+    let normalized = normalize_chat_text(raw_text);
+    let rest = normalized.strip_prefix("Message from ")?;
+    let parts = rest.split(", ").map(str::trim).collect::<Vec<_>>();
+    let time_index = parts.iter().position(|part| looks_like_time(part))?;
+    let sender = parts.first().copied()?;
+    let text = parts.get(time_index + 1..)?.join(", ").trim().to_string();
+
+    (looks_like_chat_sender(sender) && !text.is_empty() && !is_chat_chrome_text(&text)).then(|| {
+        ParsedChatMessage {
+            sender: Some(sender.to_string()),
+            timestamp: Some(parts[time_index].to_string()),
+            direction: meeting_chat_direction(&MeetingPlatform::Webex, Some(sender)),
+            text,
+        }
+    })
 }
 
 fn parse_web_chat_message(raw_text: &str) -> Option<ParsedChatMessage> {
@@ -672,6 +831,7 @@ fn parse_web_chat_message(raw_text: &str) -> Option<ParsedChatMessage> {
             .then(|| ParsedChatMessage {
                 sender: Some(sender.to_string()),
                 timestamp: Some(timestamp.trim().to_string()),
+                direction: None,
                 text: text.to_string(),
             });
     }
@@ -682,6 +842,7 @@ fn parse_web_chat_message(raw_text: &str) -> Option<ParsedChatMessage> {
             .then(|| ParsedChatMessage {
                 sender: Some(sender.to_string()),
                 timestamp: Some(timestamp.to_string()),
+                direction: None,
                 text,
             });
     }
@@ -693,6 +854,7 @@ fn parse_web_chat_message(raw_text: &str) -> Option<ParsedChatMessage> {
             .then(|| ParsedChatMessage {
                 sender: Some(sender.to_string()),
                 timestamp: Some(lines[1].clone()),
+                direction: None,
                 text,
             });
     }
@@ -705,11 +867,41 @@ fn parse_web_chat_message(raw_text: &str) -> Option<ParsedChatMessage> {
             .then(|| ParsedChatMessage {
                 sender: Some(sender.to_string()),
                 timestamp: Some(timestamp.clone()),
+                direction: None,
                 text,
             });
     }
 
     None
+}
+
+fn parse_teams_accessibility_description(raw_text: &str) -> Option<ParsedChatMessage> {
+    let line = normalize_chat_text(raw_text);
+    if line.contains('\n') {
+        return None;
+    }
+
+    let line = line.trim().trim_end_matches('.');
+    let (sender_and_text, timestamp) = line
+        .rsplit_once(" Today at ")
+        .filter(|(_, timestamp)| looks_like_time(timestamp))
+        .or_else(|| split_sender_time(line))?;
+    if !looks_like_time(timestamp) {
+        return None;
+    }
+    let (sender, text) = sender_and_text.split_once(" Sent ")?;
+    let text = text
+        .replace(" Link https://", " https://")
+        .replace(" Link http://", " http://");
+
+    (looks_like_chat_sender(sender) && !text.is_empty() && !is_chat_chrome_text(&text)).then(|| {
+        ParsedChatMessage {
+            sender: Some(sender.trim().to_string()),
+            timestamp: Some(timestamp.trim().to_string()),
+            direction: None,
+            text,
+        }
+    })
 }
 
 fn looks_like_chat_sender(sender: &str) -> bool {
@@ -739,12 +931,31 @@ fn parse_zoom_chat_message(raw_text: &str) -> Option<ParsedChatMessage> {
 
     if lines.len() == 1 {
         let (sender, message_and_time) = first.split_once(", ")?;
+        if let Some((timestamp, text)) = message_and_time.split_once(", ")
+            && looks_like_time(timestamp)
+        {
+            let sender = sender
+                .split_once(" to ")
+                .map_or(sender, |(sender, _target)| sender)
+                .trim();
+            let text = text.trim();
+            return (looks_like_chat_sender(sender)
+                && !text.is_empty()
+                && !is_chat_chrome_text(text))
+            .then(|| ParsedChatMessage {
+                sender: Some(sender.to_string()),
+                timestamp: Some(timestamp.trim().to_string()),
+                direction: None,
+                text: text.to_string(),
+            });
+        }
         let (text, timestamp) = message_and_time.rsplit_once(", ")?;
         if looks_like_time(timestamp) {
             let text = text.trim();
             return (!sender.trim().is_empty() && !text.is_empty()).then(|| ParsedChatMessage {
                 sender: non_empty_string(sender),
                 timestamp: Some(timestamp.trim().to_string()),
+                direction: None,
                 text: text.to_string(),
             });
         }
@@ -772,6 +983,7 @@ fn parse_zoom_chat_message(raw_text: &str) -> Option<ParsedChatMessage> {
     (!text.is_empty()).then(|| ParsedChatMessage {
         sender: non_empty_string(sender),
         timestamp,
+        direction: None,
         text,
     })
 }
@@ -800,6 +1012,7 @@ fn parse_slack_chat_message(raw_text: &str) -> Option<ParsedChatMessage> {
     (!text.is_empty() && !is_chat_chrome_text(&text)).then(|| ParsedChatMessage {
         sender: non_empty_string(sender),
         timestamp: Some(timestamp),
+        direction: None,
         text,
     })
 }
@@ -811,25 +1024,57 @@ fn parse_slack_accessibility_description(line: &str) -> Option<ParsedChatMessage
     for (separator, _) in message_and_time.rmatch_indices(". ") {
         let text = message_and_time[..separator].trim();
         let timestamp = message_and_time[separator + 2..].trim();
-        let Some((date, time)) = timestamp.rsplit_once(" at ") else {
-            continue;
-        };
+        let time = timestamp
+            .rsplit_once(" at ")
+            .filter(|(date, _)| !date.trim().is_empty())
+            .map(|(_, time)| time)
+            .or_else(|| {
+                let mut parts = timestamp.split(". ");
+                let time = parts.next()?.trim();
+                (looks_like_time(time) && parts.all(is_slack_accessibility_metadata))
+                    .then_some(time)
+            });
 
         if !sender.trim().is_empty()
             && !text.is_empty()
-            && !date.trim().is_empty()
-            && looks_like_time(time)
+            && time.is_some_and(looks_like_time)
             && !is_chat_chrome_text(text)
         {
             return Some(ParsedChatMessage {
                 sender: non_empty_string(sender),
-                timestamp: Some(time.trim().to_string()),
+                timestamp: time.map(|time| time.trim().to_string()),
+                direction: None,
                 text: text.to_string(),
             });
         }
     }
 
     None
+}
+
+fn is_slack_accessibility_metadata(text: &str) -> bool {
+    let lower = text.trim().to_ascii_lowercase();
+    if lower == "edited" {
+        return true;
+    }
+
+    let Some((count, kind)) = lower.split_once(' ') else {
+        return false;
+    };
+    count.parse::<usize>().is_ok()
+        && matches!(
+            kind,
+            "link"
+                | "links"
+                | "reply"
+                | "replies"
+                | "reaction"
+                | "reactions"
+                | "file"
+                | "files"
+                | "attachment"
+                | "attachments"
+        )
 }
 
 fn chat_lines(text: &str) -> Vec<String> {
@@ -861,12 +1106,16 @@ fn is_chat_chrome_text(text: &str) -> bool {
             | "send a message"
             | "message everyone"
             | "type a message"
+            | "type message here ..."
             | "conversation"
             | "message list"
+            | "chat message list"
             | "new messages"
     ) || lower.starts_with("type a message")
+        || lower.starts_with("type message here")
         || lower.starts_with("message everyone")
         || lower.starts_with("send a message")
+        || lower.starts_with("continuous chat is turned off")
 }
 
 fn split_sender_time(text: &str) -> Option<(&str, &str)> {
@@ -890,18 +1139,23 @@ pub(super) fn looks_like_time(text: &str) -> bool {
         .strip_suffix(" am")
         .or_else(|| compact.strip_suffix(" pm"));
     let time = meridiem.unwrap_or(&compact);
-    let Some((hour, minute)) = time.split_once(':') else {
+    let parts = time.split(':').collect::<Vec<_>>();
+    if !(2..=3).contains(&parts.len()) {
         return false;
-    };
+    }
 
-    let Ok(hour) = hour.parse::<u8>() else {
+    let Ok(hour) = parts[0].parse::<u8>() else {
         return false;
     };
-    let Ok(minute) = minute.parse::<u8>() else {
+    let Ok(minute) = parts[1].parse::<u8>() else {
         return false;
     };
+    let second_is_valid = parts
+        .get(2)
+        .is_none_or(|second| second.parse::<u8>().is_ok_and(|second| second < 60));
 
     minute < 60
+        && second_is_valid
         && if meridiem.is_some() {
             (1..=12).contains(&hour)
         } else {
@@ -942,6 +1196,7 @@ pub(super) fn candidate_chat_target(node: &AxNode) -> Option<MeetingChatTarget> 
         || text.contains("message everyone")
         || text.contains("message to ")
         || text.contains("type a message")
+        || text.contains("type message here")
         || text.contains("chat");
     let is_chat_control = is_button
         && !is_send_button

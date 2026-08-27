@@ -1,29 +1,22 @@
 use super::*;
 
 #[test]
-fn test_zoom_participant_roster_row_becomes_stream_candidate() {
-    let streams = find_participant_streams(
-        &MeetingPlatform::Zoom,
-        &MeetingSurface::Native,
-        &[node(
-            11,
-            "AXStaticText",
-            "Ada Lovelace (Host, me, Participant ID:417329) No audio connected",
-            None,
-        )],
+fn test_aside_meet_code_title_classifies_without_meeting_url() {
+    let web_area = node(16, "AXWebArea", "", None);
+    assert_eq!(
+        classify_browser_context(
+            Some("about:blank"),
+            Some("Meet - jyz-nspz-tzk"),
+            Some(&web_area),
+            &[],
+        ),
+        MeetingPlatform::GoogleMeet
     );
-
-    assert_eq!(streams.len(), 1);
-    assert!(
-        streams[0]
-            .signals
-            .contains(&"participant-row-label".to_string())
-    );
-    assert!(
-        streams[0]
-            .signals
-            .contains(&"audio-state-label".to_string())
-    );
+    assert!(browser_window_has_provider_signal(
+        Some("about:blank"),
+        Some("Meet - jyz-nspz-tzk - Aside"),
+    ));
+    assert!(!browser_title_platform_signals("Meet - notes").contains(&MeetingPlatform::GoogleMeet));
 }
 
 #[test]
@@ -41,6 +34,63 @@ fn test_browser_title_classifies_meet_web() {
     assert_eq!(
         classify_surface("com.google.Chrome", &MeetingPlatform::GoogleMeet),
         MeetingSurface::Web
+    );
+}
+
+#[test]
+fn test_zoom_title_and_bounded_leave_classify_without_an_exposed_url() {
+    let web_area = node(16, "AXWebArea", "John Jeong's Zoom Meeting", None);
+    let leave = node(
+        17,
+        "AXButton",
+        "Leave",
+        Some(AxRect {
+            x: 10.0,
+            y: 10.0,
+            width: 120.0,
+            height: 40.0,
+        }),
+    );
+
+    assert_eq!(
+        classify_browser_context(
+            None,
+            Some("John Jeong's Zoom Meeting - Google Chrome"),
+            Some(&web_area),
+            &[leave],
+        ),
+        MeetingPlatform::Zoom
+    );
+}
+
+#[test]
+fn test_teams_title_and_bounded_leave_classify_without_an_exposed_url() {
+    let web_area = node(
+        16,
+        "AXWebArea",
+        "Microsoft Teams meeting | Microsoft Teams",
+        None,
+    );
+    let leave = node(
+        17,
+        "AXButton",
+        "Leave",
+        Some(AxRect {
+            x: 10.0,
+            y: 10.0,
+            width: 120.0,
+            height: 40.0,
+        }),
+    );
+
+    assert_eq!(
+        classify_browser_context(
+            None,
+            Some("Microsoft Teams meeting | Microsoft Teams - Microsoft Edge"),
+            Some(&web_area),
+            &[leave],
+        ),
+        MeetingPlatform::MicrosoftTeams
     );
 }
 
@@ -204,6 +254,37 @@ fn test_webex_native_bundle_classifies_native() {
 }
 
 #[test]
+fn test_incomplete_native_webex_snapshot_is_read_only() {
+    let nodes = vec![fixture_node(
+        0,
+        "AXButton",
+        "Leave meeting or end meeting for everyone",
+        &[0],
+    )];
+
+    assert!(
+        native_meeting_root_from_snapshot(
+            &MeetingPlatform::Webex,
+            Some("John's meeting".into()),
+            nodes.clone(),
+            false,
+            false,
+        )
+        .is_some()
+    );
+    assert!(
+        native_meeting_root_from_snapshot(
+            &MeetingPlatform::Webex,
+            Some("John's meeting".into()),
+            nodes,
+            false,
+            true,
+        )
+        .is_none()
+    );
+}
+
+#[test]
 fn test_webex_browser_title_classifies_web() {
     let web_area = node(21, "AXWebArea", "Cisco Webex Meetings", None);
     assert_eq!(
@@ -218,6 +299,84 @@ fn test_webex_browser_title_classifies_web() {
     assert_eq!(
         classify_surface("com.brave.Browser", &MeetingPlatform::Webex),
         MeetingSurface::Web
+    );
+}
+
+#[test]
+fn test_current_webex_in_meeting_title_classifies_without_an_exposed_url() {
+    let web_area = node(22, "AXWebArea", "In meeting · Meeting · Webex", None);
+    let leave = node(
+        23,
+        "AXButton",
+        "Leave meeting",
+        Some(AxRect {
+            x: 10.0,
+            y: 10.0,
+            width: 40.0,
+            height: 40.0,
+        }),
+    );
+
+    assert_eq!(
+        classify_browser_context(
+            None,
+            Some("In meeting · Meeting · Webex - Google Chrome"),
+            Some(&web_area),
+            &[leave],
+        ),
+        MeetingPlatform::Webex
+    );
+}
+
+#[test]
+fn test_current_webex_browser_window_classifies_from_url_and_popup_leave_control() {
+    let web_area = node(21, "AXWebArea", "In meeting · Meeting · Webex", None);
+    let leave = node(
+        22,
+        "AXPopUpButton",
+        "Leave meeting",
+        Some(AxRect {
+            x: 10.0,
+            y: 10.0,
+            width: 120.0,
+            height: 40.0,
+        }),
+    );
+
+    assert_eq!(
+        classify_browser_context(
+            Some("https://meet1754330889177-4096.webex.com/wbxmjs/joinservice"),
+            Some("In meeting · Meeting · Webex - Google Chrome (Incognito)"),
+            Some(&web_area),
+            &[leave],
+        ),
+        MeetingPlatform::Webex
+    );
+}
+
+#[test]
+fn test_native_webex_excludes_multitasking_floating_window() {
+    let nodes = vec![node(
+        1,
+        "AXButton",
+        "Leave meeting or end meeting for everyone",
+        Some(AxRect {
+            x: 10.0,
+            y: 10.0,
+            width: 120.0,
+            height: 40.0,
+        }),
+    )];
+
+    assert!(
+        native_meeting_root_from_snapshot(
+            &MeetingPlatform::Webex,
+            Some("Webex multitasking floating window".into()),
+            nodes,
+            true,
+            false,
+        )
+        .is_none()
     );
 }
 
@@ -238,6 +397,87 @@ fn test_only_provider_like_browser_windows_poison_incomplete_capture() {
 }
 
 #[test]
+fn test_select_child_walk_prefers_visible_subset() {
+    assert_eq!(
+        select_child_walk(Some(380), Some(42), true),
+        Some(ChildWalk::Visible)
+    );
+    assert_eq!(
+        select_child_walk(Some(42), Some(20), true),
+        Some(ChildWalk::Children)
+    );
+    assert_eq!(
+        select_child_walk(Some(380), Some(42), false),
+        Some(ChildWalk::Children)
+    );
+    assert_eq!(
+        select_child_walk(Some(12), Some(0), true),
+        Some(ChildWalk::Children)
+    );
+    assert_eq!(
+        select_child_walk(Some(0), Some(8), true),
+        Some(ChildWalk::Visible)
+    );
+    assert_eq!(
+        select_child_walk(None, Some(3), false),
+        Some(ChildWalk::Visible)
+    );
+    assert_eq!(select_child_walk(None, None, true), None);
+}
+
+#[test]
+fn test_chat_priority_labels_prefer_meet_chat_over_video_tiles() {
+    assert!(is_chat_priority_label("In-call messages"));
+    assert!(is_chat_priority_label("Send a message"));
+    assert!(is_chat_priority_label("Type message here ..."));
+    assert!(is_chat_priority_label("Chat Message List"));
+    assert!(is_chat_priority_label("Open the chat panel"));
+    assert!(is_chat_priority_label("Leave call"));
+    assert!(is_chat_priority_label("Chat"));
+    assert!(!is_chat_priority_label("Ada Lovelace"));
+    assert!(!is_chat_priority_label("Your video is on"));
+}
+
+#[test]
+fn test_truncated_browser_meet_snapshot_is_accepted_when_uniquely_classified() {
+    let web_area = fixture_node(0, "AXWebArea", "Team sync - Google Meet", &[]);
+    let nodes = vec![
+        web_area.clone(),
+        fixture_node(1, "AXButton", "Leave call", &[0]),
+        fixture_node(2, "AXGroup", "In-call messages", &[1]),
+        fixture_composer(3, "Send a message", &[1, 0]),
+    ];
+
+    let BrowserMeetingSnapshot::Accept(root) = browser_meeting_root_from_snapshot(
+        nodes,
+        false,
+        Some("https://meet.google.com/abc-defg-hij".into()),
+        Some("Team sync - Google Meet - Aside".into()),
+        Some(&web_area),
+    ) else {
+        panic!("expected a uniquely classified Meet root to survive AX truncation");
+    };
+
+    assert_eq!(root.platform, MeetingPlatform::GoogleMeet);
+}
+
+#[test]
+fn test_truncated_meeting_like_window_stays_unscoped_without_classification() {
+    let web_area = fixture_node(0, "AXWebArea", "Document", &[]);
+
+    assert!(matches!(
+        browser_meeting_root_from_snapshot(
+            vec![web_area.clone()],
+            false,
+            Some("https://meet.google.com/abc-defg-hij".into()),
+            Some("Google Chrome".into()),
+            Some(&web_area),
+        ),
+        BrowserMeetingSnapshot::Unscoped
+    ));
+}
+
+#[test]
 fn test_validated_browser_bundles_are_web_surfaces() {
     for bundle_id in [
         "com.google.Chrome",
@@ -248,12 +488,14 @@ fn test_validated_browser_bundles_are_web_surfaces() {
         "com.vivaldi.Vivaldi",
         "com.operasoftware.Opera",
         "company.thebrowser.Browser",
+        "com.browseros.BrowserOS",
         "ai.perplexity.comet",
         "at.studio.AsideBrowser",
         "company.thebrowser.dia",
         "com.sigmaos.sigmaos.macos",
         "net.imput.helium",
         "com.nousresearch.hermes",
+        "app.zen-browser.zen",
     ] {
         assert!(
             is_browser_bundle(bundle_id),
