@@ -110,7 +110,16 @@
       "width": 1200
     }
   ],
-  "google-gemini-meeting-notes": [],
+  "google-gemini-meeting-notes": [
+    {
+      "filename": "gemini-meeting-note-paths.png",
+      "content": "Title: Where Gemini Meeting Notes Go\nGoogle Meet call to Take notes for me to Google Doc in organizer Drive to Calendar link and selected recipients\nIn-person session to Meet Take notes button to summary actions and transcript to Google Doc in starter Drive to email link",
+      "context": "Two separate horizontal data paths for an Anarlog guide. Keep the Google Meet call and in-person session distinct from capture through final access. Do not merge the paths. Do not add pros, cons, scores, product comparisons, or invented labels.",
+      "visualQuery": "flowchart",
+      "orientation": "horizontal",
+      "width": 1200
+    }
+  ],
   "granola-ai-alternatives": [],
   "hipaa-compliant-ai-notetaker": [
     {
