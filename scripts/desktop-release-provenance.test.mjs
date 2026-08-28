@@ -383,6 +383,13 @@ test("Mac App Store builds include a compiled app icon catalog", async () => {
   );
 });
 
+test("desktop CI does not build Mac App Store candidates", async () => {
+  const desktopCi = await readFile(".github/workflows/desktop_ci.yaml", "utf8");
+  assert.doesNotMatch(desktopCi, /Build unsigned Mac App Store candidate/);
+  assert.doesNotMatch(desktopCi, /tauri.conf.app-store.json/);
+  assert.doesNotMatch(desktopCi, /anarlog-mac-app-store-unsigned/);
+});
+
 test("keeps Mac App Store privacy metadata and replacement builds reviewable", async () => {
   const [entitlements, infoPlist, storeWorkflow, submitScript] =
     await Promise.all([
