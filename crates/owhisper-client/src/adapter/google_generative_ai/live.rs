@@ -254,12 +254,18 @@ fn transcription_response(
         })
         .collect();
 
+    let from_finalize = is_final
+        && value
+            .get("finished")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
     Some(StreamResponse::TranscriptResponse {
         start,
         duration: (end - start).max(0.0),
         is_final,
         speech_final: is_final,
-        from_finalize: false,
+        from_finalize,
         channel: Channel {
             alternatives: vec![Alternatives {
                 transcript: text.to_string(),
@@ -405,6 +411,14 @@ mod tests {
         assert_eq!(channel.alternatives[0].words[0].speaker, Some(2));
         assert_eq!(*start, 0.1);
         assert!((*duration - 0.7).abs() < f64::EPSILON);
+
+        let finalize_flush = adapter.parse_response(
+            r#"{"serverContent":{"inputTranscription":{"text":"hello there","finished":true}}}"#,
+        );
+        let StreamResponse::TranscriptResponse { from_finalize, .. } = &finalize_flush[0] else {
+            panic!("expected finalize flush");
+        };
+        assert!(*from_finalize);
     }
 
     #[test]

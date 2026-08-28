@@ -172,7 +172,7 @@ pub fn suggest_providers_for_languages_batch(languages: &[anlg_language::Languag
 
     with_support
         .into_iter()
-        .map(|(kind, _)| format!("{:?}", kind).to_lowercase())
+        .map(|(kind, _)| kind.to_string())
         .collect()
 }
 

@@ -326,11 +326,11 @@ impl Provider {
             Self::AwsTranscribe
             | Self::AzureSpeech
             | Self::GoogleCloud
+            | Self::GoogleGenerativeAi
             | Self::Groq
             | Self::RevAi
             | Self::Speechmatics
             | Self::Together
-            | Self::GoogleGenerativeAi
             | Self::Xai => None,
         }
     }

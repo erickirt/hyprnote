@@ -164,7 +164,7 @@ pub async fn suggest_providers_for_languages_live<R: tauri::Runtime>(
 
     let supported: Vec<String> = with_support
         .into_iter()
-        .map(|(kind, _)| format!("{:?}", kind).to_lowercase())
+        .map(|(kind, _)| kind.to_string())
         .collect();
 
     Ok(supported)
