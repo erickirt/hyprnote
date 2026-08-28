@@ -20,6 +20,7 @@ import {
   ZAI,
 } from "@lobehub/icons";
 import { FolderOpen, Shuffle, Waveform } from "@phosphor-icons/react";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import type { LocalModel } from "@anlg/plugin-local-stt";
@@ -337,6 +338,12 @@ export function formatModelSize(sizeBytes?: number | null) {
     maximumFractionDigits: value >= 10 ? 0 : 1,
   })} ${unit}`;
 }
+
+const styles = stylex.create({
+  roundedBrand: {
+    borderRadius: "0.125rem",
+  },
+});
 
 const _PROVIDERS = [
   {
@@ -815,7 +822,7 @@ const _PROVIDERS = [
       <ProviderBrandImage
         src="/assets/soniox-black.png"
         alt="Soniox"
-        className="rounded-xs"
+        sx={styles.roundedBrand}
       />
     ),
     baseUrl: "https://api.soniox.com",
@@ -906,7 +913,7 @@ const _PROVIDERS = [
       <ProviderBrandImage
         src="/assets/aquavoice-black.png"
         alt="AquaVoice"
-        className="rounded-xs"
+        sx={styles.roundedBrand}
       />
     ),
     baseUrl: "https://api.aquavoice.com/api/v1",

@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import {
   memo,
   useCallback,
@@ -8,7 +9,7 @@ import {
 } from "react";
 
 import type { RenderTranscriptRequest } from "@anlg/plugin-transcription";
-import { cn } from "@anlg/utils";
+import { mergeStyleXProps } from "@anlg/ui/lib/stylex";
 
 import { useSearch } from "../../search/context";
 import {
@@ -343,8 +344,9 @@ const SegmentsList = memo(
       <div
         ref={virtual.listRef}
         data-transcript-virtual-total={segments.length}
-        className="relative w-full min-w-0 overflow-x-clip"
-        style={{ height: virtual.totalHeight }}
+        {...mergeStyleXProps(styles.list, undefined, {
+          height: virtual.totalHeight,
+        })}
       >
         {virtual.virtualItems.map(({ index, key, top }) => {
           const segment = segments[index]!;
@@ -358,7 +360,7 @@ const SegmentsList = memo(
               onFocus={virtual.handleRowFocus}
               onBlur={virtual.handleRowBlur}
             >
-              <div className={cn([index > 0 && "pt-4"])}>
+              <div {...stylex.props(index > 0 && styles.segmentSpacing)}>
                 <SegmentRenderer
                   segment={segment}
                   offsetMs={offsetMs}
@@ -436,3 +438,15 @@ function useRegisterTranscriptSegments(
     return registerSource(transcriptId, () => getEntriesRef.current());
   }, [registerSource, transcriptId]);
 }
+
+const styles = stylex.create({
+  list: {
+    minWidth: 0,
+    overflowX: "clip",
+    position: "relative",
+    width: "100%",
+  },
+  segmentSpacing: {
+    paddingTop: "1rem",
+  },
+});

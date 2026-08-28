@@ -1,4 +1,5 @@
 import { Icon } from "@iconify-icon/react";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import { OutlookIcon } from "@anlg/ui/components/icons/outlook";
@@ -14,6 +15,15 @@ export type CalendarProvider = {
   nangoIntegrationId?: string;
 };
 
+const styles = stylex.create({
+  appleIcon: {
+    borderRadius: "4px",
+    height: "1.25rem",
+    objectFit: "cover",
+    width: "1.25rem",
+  },
+});
+
 const _PROVIDERS = [
   {
     disabled: false,
@@ -24,7 +34,7 @@ const _PROVIDERS = [
       <img
         src="/assets/apple-calendar.png"
         alt="Apple Calendar"
-        className="size-5 rounded-[4px] object-cover"
+        {...stylex.props(styles.appleIcon)}
       />
     ),
     platform: "macos",

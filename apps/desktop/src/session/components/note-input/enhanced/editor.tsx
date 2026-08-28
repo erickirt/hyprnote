@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import type { EditorView } from "prosemirror-view";
 import { forwardRef, memo, useCallback, useMemo } from "react";
 
@@ -143,11 +144,11 @@ const EnhancedEditorInner = forwardRef<
 
     return (
       <AudioDropTarget
-        className="h-full"
+        sx={styles.fullHeight}
         targetProps={audioDropTargetProps}
         isActive={isAudioDragActive}
       >
-        <div ref={comments.containerRef} className="relative h-full">
+        <div ref={comments.containerRef} {...stylex.props(styles.container)}>
           <NoteEditor
             ref={ref}
             className="session-note-editor enhanced-summary-editor"
@@ -188,3 +189,13 @@ const EnhancedEditorInner = forwardRef<
 );
 
 export const EnhancedEditor = memo(EnhancedEditorInner);
+
+const styles = stylex.create({
+  container: {
+    height: "100%",
+    position: "relative",
+  },
+  fullHeight: {
+    height: "100%",
+  },
+});
