@@ -10,11 +10,16 @@ impl<'a> NangoHttpClient<'a> {
     }
 }
 
+async fn proxy_bytes(
+    response: reqwest::Response,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(crate::client::response_bytes(response).await?)
+}
+
 impl<'a> anlg_http::HttpClient for NangoHttpClient<'a> {
     async fn get(&self, path: &str) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let response = self.proxy.get(path)?.send().await?;
-        let bytes = response.error_for_status()?.bytes().await?;
-        Ok(bytes.to_vec())
+        proxy_bytes(response).await
     }
 
     async fn post(
@@ -24,8 +29,7 @@ impl<'a> anlg_http::HttpClient for NangoHttpClient<'a> {
         content_type: &str,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let response = self.proxy.post(path, body, content_type)?.send().await?;
-        let bytes = response.error_for_status()?.bytes().await?;
-        Ok(bytes.to_vec())
+        proxy_bytes(response).await
     }
 
     async fn put(
@@ -35,8 +39,7 @@ impl<'a> anlg_http::HttpClient for NangoHttpClient<'a> {
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let json_value: serde_json::Value = serde_json::from_slice(&body)?;
         let response = self.proxy.put(path, &json_value)?.send().await?;
-        let bytes = response.error_for_status()?.bytes().await?;
-        Ok(bytes.to_vec())
+        proxy_bytes(response).await
     }
 
     async fn patch(
@@ -46,8 +49,7 @@ impl<'a> anlg_http::HttpClient for NangoHttpClient<'a> {
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let json_value: serde_json::Value = serde_json::from_slice(&body)?;
         let response = self.proxy.patch(path, &json_value)?.send().await?;
-        let bytes = response.error_for_status()?.bytes().await?;
-        Ok(bytes.to_vec())
+        proxy_bytes(response).await
     }
 
     async fn delete(
@@ -55,8 +57,7 @@ impl<'a> anlg_http::HttpClient for NangoHttpClient<'a> {
         path: &str,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let response = self.proxy.delete(path)?.send().await?;
-        let bytes = response.error_for_status()?.bytes().await?;
-        Ok(bytes.to_vec())
+        proxy_bytes(response).await
     }
 }
 
@@ -68,6 +69,11 @@ pub struct OwnedNangoHttpClient {
 impl OwnedNangoHttpClient {
     pub fn new(proxy: OwnedNangoProxy) -> Self {
         Self { proxy }
+    }
+
+    pub fn with_retries(mut self, retries: u32) -> Self {
+        self.proxy = self.proxy.retries(retries);
+        self
     }
 
     pub fn with_base_url_override(mut self, base_url: impl Into<String>) -> Self {
@@ -85,8 +91,7 @@ impl OwnedNangoHttpClient {
 impl anlg_http::HttpClient for OwnedNangoHttpClient {
     async fn get(&self, path: &str) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let response = self.proxy.get(path)?.send().await?;
-        let bytes = response.error_for_status()?.bytes().await?;
-        Ok(bytes.to_vec())
+        proxy_bytes(response).await
     }
 
     async fn post(
@@ -96,8 +101,7 @@ impl anlg_http::HttpClient for OwnedNangoHttpClient {
         content_type: &str,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let response = self.proxy.post(path, body, content_type)?.send().await?;
-        let bytes = response.error_for_status()?.bytes().await?;
-        Ok(bytes.to_vec())
+        proxy_bytes(response).await
     }
 
     async fn put(
@@ -107,8 +111,7 @@ impl anlg_http::HttpClient for OwnedNangoHttpClient {
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let json_value: serde_json::Value = serde_json::from_slice(&body)?;
         let response = self.proxy.put(path, &json_value)?.send().await?;
-        let bytes = response.error_for_status()?.bytes().await?;
-        Ok(bytes.to_vec())
+        proxy_bytes(response).await
     }
 
     async fn patch(
@@ -118,8 +121,7 @@ impl anlg_http::HttpClient for OwnedNangoHttpClient {
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let json_value: serde_json::Value = serde_json::from_slice(&body)?;
         let response = self.proxy.patch(path, &json_value)?.send().await?;
-        let bytes = response.error_for_status()?.bytes().await?;
-        Ok(bytes.to_vec())
+        proxy_bytes(response).await
     }
 
     async fn delete(
@@ -127,7 +129,6 @@ impl anlg_http::HttpClient for OwnedNangoHttpClient {
         path: &str,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let response = self.proxy.delete(path)?.send().await?;
-        let bytes = response.error_for_status()?.bytes().await?;
-        Ok(bytes.to_vec())
+        proxy_bytes(response).await
     }
 }
