@@ -919,6 +919,10 @@ msgstr ""
 msgid "Choose export folder"
 msgstr ""
 
+#: src/settings/appearance/sidebar-item-fields.tsx
+msgid "Choose extra fields to show above each note title."
+msgstr ""
+
 #: src/imports/screen.tsx
 msgid "Choose files"
 msgstr ""
@@ -1511,7 +1515,6 @@ msgstr ""
 
 #: src/settings/team/index.tsx
 #: src/sidebar/folder-materials.tsx
-#: src/sidebar/note-filter-menu.tsx
 msgid "Create"
 msgstr ""
 
@@ -1599,6 +1602,10 @@ msgstr ""
 
 #: src/sidebar/settings.tsx
 msgid "Data"
+msgstr ""
+
+#: src/sidebar/note-filter-menu.tsx
+msgid "Date"
 msgstr ""
 
 #: src/session/components/outer-header/metadata/date.tsx
@@ -2047,10 +2054,6 @@ msgstr ""
 msgid "File format"
 msgstr ""
 
-#: src/sidebar/note-filter-menu.tsx
-msgid "Filter notes"
-msgstr ""
-
 #: src/shared/open-note-dialog.tsx
 msgid "Find a note..."
 msgstr ""
@@ -2081,6 +2084,11 @@ msgstr ""
 
 #: src/chat/components/toolbar-controls.tsx
 msgid "Float chat"
+msgstr ""
+
+#: src/settings/appearance/sidebar-item-fields.tsx
+#: src/sidebar/note-filter-menu.tsx
+msgid "Folder"
 msgstr ""
 
 #: src/sidebar/folder-materials.tsx
@@ -2187,6 +2195,14 @@ msgstr ""
 #: src/billing/trial-started-dialog.tsx
 #: src/settings/ai/stt/select.tsx
 msgid "Got it"
+msgstr ""
+
+#: src/sidebar/note-filter-menu.tsx
+msgid "Grouping"
+msgstr ""
+
+#: src/sidebar/note-filter-menu.tsx
+msgid "Grouping, {groupingLabel}"
 msgstr ""
 
 #: src/settings/developers/index.tsx
@@ -2843,10 +2859,6 @@ msgstr ""
 msgid "My automations"
 msgstr ""
 
-#: src/sidebar/note-filter-menu.tsx
-msgid "My notes"
-msgstr ""
-
 #: src/contacts/details.tsx
 #: src/contacts/organization-details.tsx
 msgid "Name"
@@ -2864,17 +2876,12 @@ msgstr ""
 msgid "New chat"
 msgstr ""
 
-#: src/sidebar/note-filter-menu.tsx
-msgid "New folder"
-msgstr ""
-
 #: src/main/empty.tsx
 #: src/main/windows-title-bar.tsx
 msgid "New Note"
 msgstr ""
 
 #: src/sidebar/folder-materials.tsx
-#: src/sidebar/note-filter-menu.tsx
 msgid "New subfolder"
 msgstr ""
 
@@ -2884,6 +2891,7 @@ msgstr ""
 
 #: src/contacts/related-notes.tsx
 #: src/contacts/shared.tsx
+#: src/sidebar/note-filter-menu.tsx
 msgid "Newest"
 msgstr ""
 
@@ -2953,7 +2961,7 @@ msgid "No emoji found"
 msgstr ""
 
 #: src/session/components/folder-picker.tsx
-#: src/sidebar/note-filter-menu.tsx
+#: src/sidebar/timeline/utils/index.ts
 msgid "No folder"
 msgstr ""
 
@@ -3102,6 +3110,10 @@ msgstr ""
 msgid "Notes"
 msgstr ""
 
+#: src/settings/appearance/sidebar-item-fields.tsx
+msgid "Notes list"
+msgstr ""
+
 #: src/sidebar/folder-materials.tsx
 msgid "Notes stay in All notes. Materials and subfolders will be deleted."
 msgstr ""
@@ -3140,6 +3152,7 @@ msgstr ""
 
 #: src/contacts/related-notes.tsx
 #: src/contacts/shared.tsx
+#: src/sidebar/note-filter-menu.tsx
 msgid "Oldest"
 msgstr ""
 
@@ -3273,6 +3286,14 @@ msgstr ""
 #: src/settings/ai/shared/index.tsx
 #: src/settings/todo/provider-content.tsx
 msgid "or"
+msgstr ""
+
+#: src/sidebar/note-filter-menu.tsx
+msgid "Ordering"
+msgstr ""
+
+#: src/sidebar/note-filter-menu.tsx
+msgid "Ordering, {orderingLabel}"
 msgstr ""
 
 #: src/contacts/details.tsx
@@ -4143,10 +4164,6 @@ msgstr ""
 msgid "Share usage data"
 msgstr "İstifadə datasını paylaşın"
 
-#: src/sidebar/note-filter-menu.tsx
-msgid "Shared"
-msgstr ""
-
 #: src/shared-notes/index.tsx
 msgid "Shared link · View only"
 msgstr ""
@@ -4237,6 +4254,14 @@ msgstr ""
 
 #: src/main/windows-title-bar.tsx
 msgid "Show Sidebar"
+msgstr ""
+
+#: src/settings/appearance/sidebar-item-fields.tsx
+msgid "Show tags above the title."
+msgstr ""
+
+#: src/settings/appearance/sidebar-item-fields.tsx
+msgid "Show the folder above the title."
 msgstr ""
 
 #: src/settings/general/timezone.tsx
@@ -4418,6 +4443,10 @@ msgstr ""
 
 #: src/session/components/note-input/enhanced/enhance-error.tsx
 msgid "Something went wrong while generating the summary."
+msgstr ""
+
+#: src/sidebar/note-filter-menu.tsx
+msgid "Sort notes"
 msgstr ""
 
 #: src/contacts/related-notes.tsx
@@ -4679,6 +4708,10 @@ msgstr ""
 
 #: src/onboarding/permissions.tsx
 msgid "System audio enabled"
+msgstr ""
+
+#: src/settings/appearance/sidebar-item-fields.tsx
+msgid "Tags"
 msgstr ""
 
 #: src/automations/starters.tsx
