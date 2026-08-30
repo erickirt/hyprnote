@@ -33,7 +33,16 @@
   "best-ai-meeting-assistant-for-taking-notes": [],
   "best-ai-notetaker": [],
   "best-ai-notetaker-for-in-person-meetings": [],
-  "best-ai-notetaker-for-microsoft-teams": [],
+  "best-ai-notetaker-for-microsoft-teams": [
+    {
+      "filename": "teams-workflow-architecture.png",
+      "content": "Title: Five Microsoft Teams Note Taking Paths\nTeams meeting to native Teams AI to Microsoft 365 record\nTeams meeting to local desktop capture to local meeting record\nTeams meeting to bot free cloud desktop capture to vendor workspace\nTeams meeting in browser to extension capture to vendor transcript workspace\nTeams meeting to visible meeting bot to vendor workspace and integrations",
+      "context": "Render five separate horizontal data paths from a Microsoft Teams meeting to the final record. Keep every path distinct. Do not merge destinations. Do not add product names, rankings, scores, pros, cons, or invented labels.",
+      "visualQuery": "flowchart",
+      "orientation": "horizontal",
+      "width": 1200
+    }
+  ],
   "best-ai-notetaker-for-zoom": [
     {
       "filename": "zoom-capture-paths.png",
