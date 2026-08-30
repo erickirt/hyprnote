@@ -20,13 +20,13 @@ We'll compare Anarlog, Meetily, and Amical—the only three open-source meeting 
 | ---------------------- | ----------------------------------- | ------------------------- | ---------------------------- |
 | **Best For**           | Control over data and AI stack      | Pure transcription needs  | Hands-free typing everywhere |
 | **Transcription**      | Real-time via Whisper               | Real-time via Whisper.cpp | Real-time via Whisper        |
-| **Platforms**          | macOS (check download page for updates) | Windows, macOS, Linux | macOS (Windows in progress) |
+| **Platforms**          | macOS, Windows, Linux                   | Windows, macOS, Linux | macOS (Windows in progress) |
 | **License**            | MIT                                 | MIT                       | MIT                          |
-| **Meeting Support**    | All platforms, no bots              | All platforms, no bots    | Live meeting transcription   |
-| **Local Models**       | HyperLLM-V1, Whisper                | Whisper.cpp, Ollama       | Ollama support               |
+| **Meeting Support**    | All platforms, no bots              | All platforms, no bots    | Dictation; meeting capture planned |
+| **Local Models**       | Whisper, Ollama, LM Studio          | Whisper.cpp, Ollama       | Whisper, Ollama              |
 | **Cloud Options**      | OpenAI, Gemini, Claude, custom APIs | Claude, Groq, OpenAI      | OpenAI, custom APIs          |
 | **Individual Use**     | Free forever                        | Free (MIT license)        | Free (MIT license)           |
-| **Organization Plans** | Pro ($8), Enterprise (custom)       | Custom (2-100 users)      | None currently               |
+| **Organization Plans** | Pro ($15/mo or $150/yr), Enterprise (custom) | Custom (2-100 users) | None currently               |
 | **GitHub Stars**       | 6.4k+                               | 7.8k+                     | 96                           |
 
 
@@ -36,7 +36,7 @@ We'll compare Anarlog, Meetily, and Amical—the only three open-source meeting 
 
 [Anarlog](/) is an open-source AI notepad for meetings that gives you control over your data and AI stack. Meeting data is stored locally in SQLite, with Markdown export available when you need a portable copy.
 
-The interface works like Apple Notes. You open it and start typing. No list of past meetings to navigate, no calendar integration. Just a blank canvas ready to use.
+The interface pairs a lightweight note editor with recent meetings and optional calendar context. You can start from a blank note, capture the call, and keep the resulting transcript and summary in the same local workspace.
 
 While you're writing, Anarlog listens to both your microphone and system audio. Once the meeting ends, it enhances your manual notes into actionable AI summaries based on your chosen template.
 
@@ -120,7 +120,9 @@ Free for individuals under MIT license. Organizational (2-100 users) and enterpr
 
 **Available as:** Mac app (desktop application, Windows support in progress)
 
-![Amical](/images/blog/articles/open-source-meeting-transcription-software/amical.webp)
+![Amical floating recorder dictating a structured follow-up email in Gmail](/images/blog/library/products/amical/dictation/2026-08-30-demo.gif)
+
+*Amical's official README demo shows its floating recorder turning speech into a structured Gmail draft. Source: [Amical on GitHub](https://github.com/amicalhq/amical#-overview).*
 
 #### Top features
 
