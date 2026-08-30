@@ -1,9 +1,12 @@
 import { tool } from "ai";
 import { z } from "zod";
 
+import { searchMeetingContent } from "./note-files";
 import type { ToolDependencies } from "./types";
 
 import type { SearchFilters } from "~/search/contexts/engine/types";
+import { loadSessionSummariesByFolder } from "~/session/queries";
+import { sessionSearchTimestamp } from "~/session/utils";
 
 const gteSchema = z
   .number()
@@ -74,6 +77,99 @@ const searchMeetingsFiltersSchema = z
 
 type AbsoluteCreatedAtFilter = z.infer<typeof absoluteCreatedAtFilterSchema>;
 type SearchMeetingsFiltersInput = z.infer<typeof searchMeetingsFiltersSchema>;
+
+function sessionMatchesCreatedAt(
+  timestamp: number,
+  filter: SearchFilters["created_at"],
+): boolean {
+  if (!filter) {
+    return true;
+  }
+
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return false;
+  }
+
+  if (filter.eq !== undefined && timestamp !== filter.eq) {
+    return false;
+  }
+  if (filter.gte !== undefined && timestamp < filter.gte) {
+    return false;
+  }
+  if (filter.lte !== undefined && timestamp > filter.lte) {
+    return false;
+  }
+  if (filter.gt !== undefined && timestamp <= filter.gt) {
+    return false;
+  }
+  if (filter.lt !== undefined && timestamp >= filter.lt) {
+    return false;
+  }
+
+  return true;
+}
+
+async function searchFolderMeetings({
+  query,
+  folderFilter,
+  createdAt,
+  limit,
+}: {
+  query: string;
+  folderFilter: string;
+  createdAt: SearchFilters["created_at"];
+  limit: number;
+}): Promise<{
+  results: Array<{
+    id: string;
+    title: string;
+    excerpt: string;
+    score: number;
+    created_at: number;
+  }>;
+}> {
+  const sessions = (await loadSessionSummariesByFolder(folderFilter))
+    .map((session) => ({
+      ...session,
+      searchAt: sessionSearchTimestamp(session.event_json, session.created_at),
+    }))
+    .filter((session) => sessionMatchesCreatedAt(session.searchAt, createdAt));
+
+  if (sessions.length === 0) {
+    return { results: [] };
+  }
+
+  if (!query.trim()) {
+    return {
+      results: sessions.slice(0, limit).map((session) => ({
+        id: session.id,
+        title: session.title,
+        excerpt: "",
+        score: 0,
+        created_at: session.searchAt,
+      })),
+    };
+  }
+
+  const content = await searchMeetingContent({
+    query,
+    sessionIds: sessions.map((session) => session.id),
+    limit,
+  });
+  const createdAtById = new Map(
+    sessions.map((session) => [session.id, session.searchAt]),
+  );
+
+  return {
+    results: content.results.map((match) => ({
+      id: match.sessionId,
+      title: match.title,
+      excerpt: match.snippets[0]?.text ?? "",
+      score: match.score,
+      created_at: createdAtById.get(match.sessionId) ?? 0,
+    })),
+  };
+}
 
 function getRecentDaysFilter(
   days: number,
@@ -147,9 +243,20 @@ Returns relevant meetings with matching content excerpts.
           }
         : null;
 
+      const folderFilter = deps.getFolderFilter?.() ?? null;
+      const limit = params.limit ?? 5;
+
+      if (folderFilter !== null) {
+        return searchFolderMeetings({
+          query,
+          folderFilter,
+          createdAt: effectiveFilters?.created_at,
+          limit,
+        });
+      }
+
       const hits = await deps.search(query, effectiveFilters);
       const meetingHits = hits.filter((hit) => hit.document.type === "session");
-      const limit = params.limit ?? 5;
       const results = meetingHits.slice(0, limit).map((hit) => ({
         id: hit.document.id,
         title: hit.document.title,

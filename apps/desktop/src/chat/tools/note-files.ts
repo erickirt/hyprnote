@@ -9,6 +9,7 @@ import {
   loadSessionContentSnapshot,
   type SessionContentSnapshot,
 } from "~/session/content-queries";
+import { loadSessionSummariesByFolder } from "~/session/queries";
 import {
   formatMeetingChatRecordsAsMarkdown,
   loadMeetingChatRecords,
@@ -356,7 +357,7 @@ function searchNote(note: LoadedNoteFile, query: string): SearchMatch | null {
   };
 }
 
-async function searchMeetingContent({
+export async function searchMeetingContent({
   query,
   sessionIds,
   limit,
@@ -374,9 +375,8 @@ async function searchMeetingContent({
     };
   }
 
-  const candidateIds = sessionIds?.length
-    ? sessionIds
-    : await loadActiveSessionIds();
+  const candidateIds =
+    sessionIds === undefined ? await loadActiveSessionIds() : sessionIds;
   const results: SearchMatch[] = [];
 
   for (const sessionId of candidateIds) {
@@ -547,7 +547,7 @@ export const buildReadNoteTool = (_deps: ToolDependencies) =>
       }),
   });
 
-export const buildSearchMeetingContentTool = (_deps: ToolDependencies) =>
+export const buildSearchMeetingContentTool = (deps: ToolDependencies) =>
   tool({
     description:
       "Search local meeting notes and transcripts for exact words or phrases. Use search_meetings first for open-ended questions about past meetings, people, decisions, or topics. This is lexical content search, not vector search.",
@@ -570,9 +570,22 @@ export const buildSearchMeetingContentTool = (_deps: ToolDependencies) =>
       meeting_ids?: string[];
       limit?: number;
     }) => {
+      const folderFilter = deps.getFolderFilter?.() ?? null;
+      const folderSessionIds =
+        folderFilter === null
+          ? undefined
+          : (await loadSessionSummariesByFolder(folderFilter)).map(
+              (session) => session.id,
+            );
+      const sessionIds =
+        folderSessionIds === undefined
+          ? params.meeting_ids
+          : params.meeting_ids?.length
+            ? params.meeting_ids.filter((id) => folderSessionIds.includes(id))
+            : folderSessionIds;
       const result = await searchMeetingContent({
         query: params.query,
-        sessionIds: params.meeting_ids,
+        sessionIds,
         limit: Math.min(params.limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT),
       });
       return {

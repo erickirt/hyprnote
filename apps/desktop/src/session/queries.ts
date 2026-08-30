@@ -16,7 +16,11 @@ export {
   createSession,
   getOrCreateSessionForEventId,
 } from "./queries/creation";
-export { useFolderPaths } from "./queries/folders";
+export {
+  loadSessionSummariesByFolder,
+  useFolderPaths,
+} from "./queries/folders";
+export type { FolderSessionSummary } from "./queries/folders";
 export {
   applySessionProposal,
   declineSessionProposal,
