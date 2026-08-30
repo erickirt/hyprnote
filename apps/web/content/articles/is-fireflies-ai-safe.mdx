@@ -148,9 +148,9 @@ Works with any meeting platform (Zoom, Teams, Google Meet, etc.) without joining
 
 Export to Markdown, PDF, or rich text. Integrate with tools you already use like Obsidian or Attio. Connect to any AI provider you choose—OpenAI, Mistral, or custom endpoints. No vendor lock-in.
 
-**Built for compliance:**
+**Built for controlled deployments:**
 
-Meets HIPAA, GDPR, SOX, and other privacy requirements. Perfect for healthcare, legal, and financial professionals. No third-party data processors involved. Complete audit trail stays local.
+A local-only configuration can keep capture, transcription, and summarization on-device. That can reduce vendor scope, but it does not replace consent, device security, access controls, audit requirements, or a review of any cloud services you enable.
 
 **Enterprise-ready:**
 
@@ -158,14 +158,14 @@ For sensitive work, configure local processing where appropriate and complete a 
 
 ### What Anarlog collects (for full transparency):
 
-Unlike Fireflies, Anarlog collects minimal, anonymous usage data that you can opt out of:
+Unlike Fireflies, Anarlog keeps canonical meeting content local by default. Its privacy policy separately describes pseudonymous usage data, device and log data, optional cloud features, and the services those features use:
 
-- **Optional analytics:** Anonymous session IDs and feature usage patterns (via PostHog)—disable in Settings
-- **Optional crash reports:** Error traces to fix bugs (via Sentry)—disable in Settings
-- **Website interactions:** If you use live chat or submit feedback
-- **Payment info:** Only for paid users, processed through Stripe
+- **Usage and diagnostics:** Pseudonymous product events, device information, logs, and sanitized crash reports
+- **Cloud features:** Content you deliberately send to hosted transcription, AI, sharing, or connectors
+- **Website interactions:** Analytics, support, and feedback activity
+- **Payment info:** Processed by Stripe for paid users
 
-Anarlog never collects your recordings, transcripts, notes, meeting participant information, conversations, or personal files.
+Analytics and telemetry are designed not to include meeting audio, transcripts, notes, or summaries. Cloud transcription, AI, sharing, and connectors process the content required for the feature you enable.
 
 [Check Anarlog's take on Privacy](/privacy)
 
