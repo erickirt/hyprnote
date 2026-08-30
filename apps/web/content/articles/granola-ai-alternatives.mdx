@@ -40,7 +40,7 @@ Those changes make the real comparison more specific. You should switch when ano
 
 | Tool | Capture model | Where the meeting record lives | Best fit | Main tradeoff |
 | --- | --- | --- | --- | --- |
-| **Anarlog** | Desktop system audio, no meeting bot | Local SQLite with Markdown export | Local-first meeting workflows | Mac-focused product experience today |
+| **Anarlog** | Desktop system audio, no meeting bot | Local SQLite with Markdown export | Local-first meeting workflows | Windows and Linux builds are beta |
 | **Jamie** | Desktop and mobile capture, no meeting bot | Jamie workspace | Multilingual bot-free notes with EU hosting | Managed service rather than a local file workflow |
 | **Tactiq** | Browser extension using meeting captions | Tactiq workspace and exports | Live browser transcripts | Depends on supported browsers and meeting web apps |
 | **Notta** | Desktop, mobile, browser, imports, and meeting workflows | Notta workspace or local Privacy Mode | Multilingual and cross-device work | Capture and storage behavior varies by mode |
@@ -72,7 +72,7 @@ With Anarlog, the durable artifact is a local meeting record you can search, bac
 
 **Consider the tradeoffs:**
 
-- The current product experience is focused on macOS.
+- macOS is the most mature build; Windows and Linux builds are in beta.
 - Device-based capture cannot attend a meeting when your computer is absent.
 - Local models use your machine's storage and compute.
 - Local ownership means you are responsible for backup and access controls.
@@ -211,7 +211,7 @@ Anarlog and Meetily share a local-first direction. The practical choice comes do
 
 Start with the meeting artifact you want to keep.
 
-- If it should be a local Markdown file, start with **Anarlog**.
+- If the canonical record should stay local with Markdown export, start with **Anarlog**.
 - If it should live in a polished collaborative notepad, stay with **Granola** or test **Jamie**.
 - If the live browser transcript is the product, test **Tactiq**.
 - If language and device coverage dominate the decision, test **Notta**.
@@ -250,6 +250,6 @@ Not necessarily. A missing participant icon tells you how audio is captured, not
 
 ### What is the closest open-source alternative to Granola?
 
-Anarlog is the closest match when you want a polished bot-free notepad with local Markdown storage and control over the AI stack. Meetily is another open-source option for users who prioritize a local, self-managed setup and broader desktop platform coverage.
+Anarlog is the closest match when you want a polished bot-free notepad with a canonical local SQLite record, Markdown export, and control over the AI stack. Meetily is another open-source option for users who prioritize a local, self-managed setup and broader desktop platform coverage.
 
-If the real reason you are leaving Granola is ownership rather than interface preference, [try Anarlog](/). Your meeting memory stays in files you control, and you decide which AI stack touches it.
+If the real reason you are leaving Granola is ownership rather than interface preference, [try Anarlog](/). Your meeting memory stays in local SQLite, you can export portable copies, and you decide which AI stack touches it.

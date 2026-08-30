@@ -34,9 +34,9 @@ I tested five tools that take different positions on this spectrum. For each one
 
 ![Current Anarlog meeting summary view](/images/blog/library/products/anarlog/desktop/2026-08-20-meeting-summary.jpg "char-editor-width=80")
 
-[Anarlog](https://anarlog.so) is an open-source AI notepad for meetings, built for people who want complete control over their data and AI stack. It captures system audio from any meeting platform without joining your call and without requiring calendar permissions. 
+[Anarlog](https://anarlog.so) is an open-source AI notepad for meetings, built for people who want complete control over their data and AI stack. It captures system audio from any meeting platform without joining your call and without requiring calendar permissions.
 
-You can take notes during the meeting in Anarlog's built-in editor while it transcribes in the background, and the AI combines both into a structured summary after the call. 
+You can take notes during the meeting in Anarlog's built-in editor while it transcribes in the background, and the AI combines both into a structured summary after the call.
 
 The AI stack is yours to choose: Anarlog's managed cloud service, your own API keys, or fully local models through Ollama or LM Studio for offline operation. The canonical meeting record stays in local SQLite; attachments and recordings remain local files, and you decide whether to enable cloud services.
 
@@ -51,7 +51,7 @@ If you use on-device transcription and local models without enabling CloudSync o
 
 #### Where it falls short
 
-- Currently available for macOS; check the download page for the latest platform availability.
+- macOS is the most mature build; Windows and Linux builds are in beta.
 - No mobile app, no video recording.
 - No built-in CRM integrations. If you need notes pushed into Salesforce, you will need to build that yourself.
 - CloudSync and sharing are optional features; the canonical meeting record remains local by default.
@@ -64,7 +64,7 @@ The Free plan supports on-device transcription and your own API keys. Pro is $15
 
 ![Meetily workspace with transcript, summary, decisions, and action items](/images/blog/articles/local-ai-meeting-notes/image-20.png "char-editor-width=80")
 
-[Meetily](https://meetily.ai) is an open-source meeting assistant (MIT license) that runs transcription entirely on your device using Whisper or Parakeet models. 
+[Meetily](https://meetily.ai) is an open-source meeting assistant (MIT license) that runs transcription entirely on your device using Whisper or Parakeet models.
 
 It captures system audio [without a bot](/blog/bot-free-ai-meeting-assistants/), works with Zoom, Teams, Meet, and anything else that produces audio on your machine. Parakeet is the default engine and runs significantly faster than Whisper with lower resource usage, with GPU acceleration built in for Apple Silicon, NVIDIA, and AMD hardware.
 
@@ -150,11 +150,11 @@ $49 one-time purchase (pre-release price). $99 at version 1.0. 10 hours of free 
 
 ![Screenpipe meeting transcript beneath a shared project document](/images/blog/articles/local-ai-meeting-notes/image-26.png "char-editor-width=80")
 
-[Screenpipe](https://screenpi.pe) records your screen and audio 24/7, transcribes everything locally with Whisper, and indexes it in a searchable local database. 
+[Screenpipe](https://screenpi.pe) records your screen and audio 24/7, transcribes everything locally with Whisper, and indexes it in a searchable local database.
 
 It is not a meeting tool. It is an open-source AI memory layer for your entire desktop that happens to be very good at meeting notes, because meeting notes are a side effect of it always running.
 
-After a call, you ask the AI: "Summarize my meeting from 2 to 3pm and list action items." Screenpipe searches your audio transcripts and screen content from that time window. 
+After a call, you ask the AI: "Summarize my meeting from 2 to 3pm and list action items." Screenpipe searches your audio transcripts and screen content from that time window.
 
 It captures what audio-only tools miss: the URL someone dropped in the Zoom chat, the spreadsheet someone shared, the code someone walked through in a terminal. It also runs as an MCP server, so Cursor, Claude Code, and Cline can query your meeting history directly.
 
@@ -181,23 +181,23 @@ $400 lifetime (one-time). All features, all future updates. $600 lifetime + 1 ye
 
 Local processing means accepting tradeoffs. Local models are not as accurate as cloud transcription on messy audio, speaker diarization is still maturing across the board, and most of these tools are macOS-only or macOS-first. The gap is closing fast, though, and for anyone handling sensitive conversations, the architectural guarantee that your audio never left your device is worth more than a privacy policy that can change with a terms-of-service update.
 
-Anarlog is the strongest choice if you want complete control: open-source, your choice of AI provider, and data that lives on your device in a format you own. 
+Anarlog is the strongest choice if you want an open-source app with AI-provider choice, a canonical local SQLite record, and portable exports.
 
-Meetily is the best open-source option if you need Windows support or want a free polished app. 
+Meetily is the strongest open-source option here if you prioritize a more established Windows build or a fully self-managed setup.
 
-Shadow is the only tool that captures what is on screen alongside what is said. 
+Shadow is the only tool that captures what is on screen alongside what is said.
 
 Talat is for people who loved Granola but could not accept cloud dependency, and it is the only one-time purchase purpose-built meeting tool here.
 
-Screenpipe is the power user's option: not just meeting notes but a searchable memory of your entire workday. 
+Screenpipe is the power user's option: not just meeting notes but a searchable memory of your entire workday.
 
-If you want to start with local AI meeting notes that give you full ownership, [try Anarlog](https://anarlog.so). It is free, open-source, and works offline with local models. Your first meeting's notes will land on your device, readable by any tool you already use.
+If you want to start with local AI meeting notes that give you full ownership, [try Anarlog](https://anarlog.so). It is free, open-source, and works offline with local models. Your first meeting's canonical record stays in local SQLite, and you can export Markdown for another tool when you need it.
 
 ## Frequently Asked Questions
 
 ### 1. Is Granola a local AI notetaker?
 
-No. Granola captures system audio locally, which is why it gets grouped with local tools, but the similarity ends there. Your audio is sent to Deepgram for transcription, your transcript is processed through GPT-4o or Claude for summarization, and your notes are stored on AWS servers. There is no offline mode and no option to run local models. Granola is a cloud tool with a local audio capture step. 
+No. Granola captures system audio locally, which is why it gets grouped with local tools, but the similarity ends there. Your audio is sent to Deepgram for transcription, your transcript is processed through GPT-4o or Claude for summarization, and your notes are stored on AWS servers. There is no offline mode and no option to run local models. Granola is a cloud tool with a local audio capture step.
 
 If you want the same notepad-first workflow with different storage or AI choices, compare these [alternatives to Granola](/blog/granola-ai-alternatives/).
 

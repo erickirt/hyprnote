@@ -31,9 +31,9 @@ Let's get into it.
 
 Most AI meeting tools make the same trade: convenience in exchange for your data living in someone else's database, locked into their format, processed by their AI. Anarlog doesn't make that trade.
 
-<u>[Anarlog](https://anarlog.so)</u> (formerly Hyprnote) is an open-source AI notepad for meetings, built for people who want complete control over their files, their AI stack, and what happens to their data. 
+<u>[Anarlog](https://anarlog.so)</u> is an open-source AI notepad for meetings, built for people who want control over their meeting record, AI stack, and data paths.
 
-Every meeting is saved as a plain .md file on your device. You choose which AI processes it. Nothing is locked behind Anarlog's ecosystem.
+The canonical meeting record stays in local SQLite on your device. Export Markdown when you need a portable copy, and choose which AI processes it.
 
 That design is deliberate. Engineers, developers, and privacy-conscious professionals in fields like law, healthcare, and finance don't want a SaaS tool deciding what happens to their meeting data.
 
@@ -50,15 +50,15 @@ That design is deliberate. Engineers, developers, and privacy-conscious professi
 
 #### Pros
 
-- True data ownership - your files, on your device, not in someone's database
-- No lock-in of any kind: portable format, swappable AI providers, works with any editor
+- Local ownership - the canonical meeting record lives in SQLite on your device
+- Less lock-in: portable exports and a choice of AI providers
 - Works for any conversation - phone calls, in-person meetings, anything with audio, not just scheduled video calls
 - Fully local mode available for teams that can't send data to any external service
 - Open source builds trust with security teams; the code is there to inspect
 
 #### Cons
 
-- Currently available for macOS; check the download page for the latest platform availability
+- macOS is the most mature build; Windows and Linux builds are in beta
 - No mobile app, so in-person meetings away from your computer aren't captured
 - No video recording - notes and transcripts only
 
