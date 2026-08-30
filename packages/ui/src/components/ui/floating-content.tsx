@@ -1,3 +1,7 @@
+import type { ComponentProps } from "react";
+
+import { useSquircleRef } from "@anlg/ui/hooks/use-squircle";
+import { panelSquircle } from "@anlg/ui/lib/squircle";
 import { cn } from "@anlg/utils";
 
 export const appFloatingContentClassName =
@@ -7,8 +11,10 @@ export type FloatingContentVariant = "default" | "app";
 
 export function AppFloatingPanel({
   className,
+  ref,
   ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
+}: ComponentProps<"div">) {
+  const squircleRef = useSquircleRef<HTMLDivElement>(ref, panelSquircle);
   return (
     <div
       className={cn([
@@ -16,6 +22,7 @@ export function AppFloatingPanel({
         className,
       ])}
       {...props}
+      ref={squircleRef}
     />
   );
 }
