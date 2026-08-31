@@ -85,7 +85,7 @@ export function SettingsNav() {
         { id: "account", label: t`Account`, icon: User },
         {
           id: "team",
-          label: t`Team`,
+          label: t`Teams`,
           icon: UsersThree,
           requiresPro: !workspaces.isLoading && !hasExistingWorkspace,
         },

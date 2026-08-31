@@ -284,6 +284,10 @@ msgstr "Add material"
 msgid "Add meeting decisions and follow-ups to a Notion project."
 msgstr "Add meeting decisions and follow-ups to a Notion project."
 
+#: src/settings/team/index.tsx
+msgid "Add members"
+msgstr "Add members"
+
 #: src/settings/dictionary/index.tsx
 msgid "Add names, jargon, or product terms to prefer"
 msgstr "Add names, jargon, or product terms to prefer"
@@ -816,6 +820,10 @@ msgstr "Change photo"
 #: src/session/components/note-input/transcript/renderer/selection-menu.tsx
 msgid "Change speaker"
 msgstr "Change speaker"
+
+#: src/settings/team/index.tsx
+msgid "Change workspace logo"
+msgstr "Change workspace logo"
 
 #: src/main/sync-status.tsx
 msgid "Changes stay on this device until you resume sync"
@@ -2417,7 +2425,6 @@ msgid "Invitations sent."
 msgstr "Invitations sent."
 
 #: src/session-sharing/invite-recipients.tsx
-#: src/settings/team/index.tsx
 msgid "Invite"
 msgstr "Invite"
 
@@ -3696,6 +3703,10 @@ msgstr "Remove photo"
 msgid "Remove repository"
 msgstr "Remove repository"
 
+#: src/settings/team/index.tsx
+msgid "Remove workspace logo"
+msgstr "Remove workspace logo"
+
 #: src/sidebar/folder-materials.tsx
 msgid "Rename"
 msgstr "Rename"
@@ -3711,10 +3722,6 @@ msgstr "Rename folder"
 #: src/settings/sync/index.tsx
 msgid "Rename this device"
 msgstr "Rename this device"
-
-#: src/settings/team/index.tsx
-msgid "Rename workspace"
-msgstr "Rename workspace"
 
 #: src/automations/starters.tsx
 msgid "Render canonical Markdown"
@@ -4779,13 +4786,13 @@ msgid "Teach coding agents when and how to use the Anarlog CLI and MCP"
 msgstr "Teach coding agents when and how to use the Anarlog CLI and MCP"
 
 #: src/settings/team/index.tsx
-#: src/sidebar/settings.tsx
-msgid "Team"
-msgstr "Team"
-
-#: src/settings/team/index.tsx
 msgid "teammate@company.com"
 msgstr "teammate@company.com"
+
+#: src/settings/team/index.tsx
+#: src/sidebar/settings.tsx
+msgid "Teams"
+msgstr "Teams"
 
 #: src/settings/general/meeting-settings.tsx
 msgid "Tell participants when listening starts; this does not confirm consent."

@@ -284,6 +284,10 @@ msgstr ""
 msgid "Add meeting decisions and follow-ups to a Notion project."
 msgstr ""
 
+#: src/settings/team/index.tsx
+msgid "Add members"
+msgstr ""
+
 #: src/settings/dictionary/index.tsx
 msgid "Add names, jargon, or product terms to prefer"
 msgstr ""
@@ -815,6 +819,10 @@ msgstr ""
 
 #: src/session/components/note-input/transcript/renderer/selection-menu.tsx
 msgid "Change speaker"
+msgstr ""
+
+#: src/settings/team/index.tsx
+msgid "Change workspace logo"
 msgstr ""
 
 #: src/main/sync-status.tsx
@@ -2417,7 +2425,6 @@ msgid "Invitations sent."
 msgstr ""
 
 #: src/session-sharing/invite-recipients.tsx
-#: src/settings/team/index.tsx
 msgid "Invite"
 msgstr ""
 
@@ -3696,6 +3703,10 @@ msgstr ""
 msgid "Remove repository"
 msgstr ""
 
+#: src/settings/team/index.tsx
+msgid "Remove workspace logo"
+msgstr ""
+
 #: src/sidebar/folder-materials.tsx
 msgid "Rename"
 msgstr ""
@@ -3710,10 +3721,6 @@ msgstr ""
 
 #: src/settings/sync/index.tsx
 msgid "Rename this device"
-msgstr ""
-
-#: src/settings/team/index.tsx
-msgid "Rename workspace"
 msgstr ""
 
 #: src/automations/starters.tsx
@@ -4779,12 +4786,12 @@ msgid "Teach coding agents when and how to use the Anarlog CLI and MCP"
 msgstr ""
 
 #: src/settings/team/index.tsx
-#: src/sidebar/settings.tsx
-msgid "Team"
+msgid "teammate@company.com"
 msgstr ""
 
 #: src/settings/team/index.tsx
-msgid "teammate@company.com"
+#: src/sidebar/settings.tsx
+msgid "Teams"
 msgstr ""
 
 #: src/settings/general/meeting-settings.tsx
