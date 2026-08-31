@@ -76,11 +76,12 @@ export function useSessionRecorder(
   const reportedFailureRef = useRef<string | null>(null);
   const durationRef = useRef(0);
   const captureRegisteredRef = useRef(false);
+  const stopRef = useRef<() => Promise<StopResult>>(async () => "noop");
 
   const registerCapture = useCallback(() => {
     if (captureRegisteredRef.current) return;
     captureRegisteredRef.current = true;
-    beginMobileCapture(sessionId);
+    beginMobileCapture(sessionId, () => stopRef.current());
   }, [sessionId]);
 
   const unregisterCapture = useCallback(() => {
@@ -188,6 +189,7 @@ export function useSessionRecorder(
     setFailure(null);
     reportedFailureRef.current = null;
     setPhase("starting");
+    registerCapture();
     try {
       let permission = await getRecordingPermissionsAsync();
       if (!permission.granted) {
@@ -213,6 +215,7 @@ export function useSessionRecorder(
         captureAnalytics("session_start_failed", {
           failure_stage: "microphone_permission",
         });
+        unregisterCapture();
         setPhase("unavailable");
         return;
       }
@@ -225,7 +228,6 @@ export function useSessionRecorder(
       });
       if (!isCurrent()) return;
       writerRef.current = new SessionWavWriter(sessionId);
-      registerCapture();
       await stream.start();
       if (!isCurrent()) {
         phaseRef.current = "recording";
@@ -416,7 +418,6 @@ export function useSessionRecorder(
     return "noop";
   };
 
-  const stopRef = useRef(stop);
   stopRef.current = stop;
   useMountEffect(() => () => {
     activeRef.current = false;
