@@ -1,8 +1,9 @@
 import * as Sentry from "@sentry/react-native";
 import { type ErrorBoundaryProps, Stack, usePathname } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 import {
   getMobileCaptureActive,
@@ -11,6 +12,8 @@ import {
 import { recoverInterruptedRecordings } from "@/audio/recover-recordings";
 import { AuthProvider, useAuth } from "@/auth/context";
 import { PaywallScreen, SignInScreen } from "@/auth/screens";
+import type { SignInMethod } from "@/auth/sign-in";
+import { BrandLoadingView } from "@/components/brand-loading-view";
 import { Button } from "@/components/ui/button";
 import { Colors, Spacing, Typography } from "@/constants/theme";
 import { initializeAnalytics, screenAnalytics } from "@/lib/analytics";
@@ -28,6 +31,7 @@ import { initializeWatchConnectivity } from "@/watch-connectivity";
 
 initializeErrorReporting();
 initializeWatchConnectivity();
+SplashScreen.setOptions({ duration: 300, fade: true });
 
 const routeErrorKeys = new WeakMap<Error, number>();
 let nextRouteErrorKey = 0;
@@ -96,10 +100,10 @@ function Gate() {
   );
   const [signingIn, setSigningIn] = useState(false);
 
-  const handleSignIn = async () => {
+  const handleSignIn = async (method: SignInMethod) => {
     setSigningIn(true);
     try {
-      await auth.signIn();
+      await auth.signIn(method);
     } catch {
       // AuthProvider reports the actionable failure before rejecting.
     } finally {
@@ -129,16 +133,15 @@ function Gate() {
     auth.status === "loading" ||
     (auth.status === "signed_in" && !auth.billingReady)
   ) {
-    return (
-      <View style={styles.loading}>
-        <ActivityIndicator color={Colors.ink} />
-      </View>
-    );
+    return <BrandLoadingView />;
   }
 
   if (auth.status === "signed_out") {
     return (
-      <SignInScreen busy={signingIn} onSignIn={() => void handleSignIn()} />
+      <SignInScreen
+        busy={signingIn}
+        onSignIn={(method) => void handleSignIn(method)}
+      />
     );
   }
 
@@ -229,12 +232,6 @@ function RootLayout() {
 export default Sentry.wrap(RootLayout);
 
 const styles = StyleSheet.create({
-  loading: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: Colors.paper,
-  },
   routeError: {
     flex: 1,
     alignItems: "center",

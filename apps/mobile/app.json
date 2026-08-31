@@ -9,7 +9,8 @@
     "userInterfaceStyle": "light",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "so.anarlog.mobile"
+      "bundleIdentifier": "so.anarlog.mobile",
+      "usesAppleSignIn": true
     },
     "android": {
       "package": "so.anarlog.mobile",
@@ -30,9 +31,10 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FFFFFF",
+          "backgroundColor": "#F7E7B0",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 76,
+          "resizeMode": "contain"
         }
       ],
       [

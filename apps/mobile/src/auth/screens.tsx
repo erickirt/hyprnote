@@ -1,3 +1,4 @@
+import { Image } from "expo-image";
 import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -8,8 +9,16 @@ import {
   MOBILE_BILLING_RETURN_URL,
   parseBillingCallbackUrl,
 } from "@/auth/billing-handoff";
+import type { SignInMethod } from "@/auth/sign-in";
 import { Button } from "@/components/ui/button";
-import { Colors, CornerCurve, Spacing, Typography } from "@/constants/theme";
+import {
+  Colors,
+  CornerCurve,
+  Gradients,
+  Radius,
+  Spacing,
+  Typography,
+} from "@/constants/theme";
 import { captureAnalytics } from "@/lib/analytics";
 import { env } from "@/lib/env";
 import { captureOperationalError } from "@/lib/error-reporting";
@@ -19,31 +28,96 @@ export function SignInScreen({
   onSignIn,
   busy,
 }: {
-  onSignIn: () => void;
+  onSignIn: (method: SignInMethod) => void;
   busy: boolean;
 }) {
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.body}>
-        <View style={styles.titleRow}>
-          <Text style={styles.title}>Anarlog</Text>
-          <View style={styles.accentDot} />
+    <SafeAreaView style={[styles.safeArea, styles.brandBackground]}>
+      <View style={styles.signInMethodsScreen} testID="sign-in-methods">
+        <View style={styles.signInMethods}>
+          <View style={styles.signInMethodList}>
+            <Button
+              label="Sign in with Apple"
+              onPress={() => onSignIn("apple")}
+              disabled={busy}
+              leading={
+                <ProviderIcon
+                  source={require("../../assets/images/auth/apple.svg")}
+                />
+              }
+              variant="outline"
+              style={styles.signInMethod}
+            />
+            <Button
+              label="Sign in with Google"
+              onPress={() => onSignIn("google")}
+              disabled={busy}
+              leading={
+                <ProviderIcon
+                  source={require("../../assets/images/auth/google.svg")}
+                />
+              }
+              variant="outline"
+              style={styles.signInMethod}
+            />
+            <Button
+              label="Sign in with Microsoft"
+              onPress={() => onSignIn("azure")}
+              disabled={busy}
+              leading={
+                <ProviderIcon
+                  source={require("../../assets/images/auth/microsoft.svg")}
+                />
+              }
+              variant="outline"
+              style={styles.signInMethod}
+            />
+            <Button
+              label="Sign in with GitHub"
+              onPress={() => onSignIn("github")}
+              disabled={busy}
+              leading={
+                <ProviderIcon
+                  source={require("../../assets/images/auth/github.svg")}
+                />
+              }
+              variant="outline"
+              style={styles.signInMethod}
+            />
+            <Button
+              label="Sign in with Email"
+              onPress={() => onSignIn("email")}
+              disabled={busy}
+              leading={
+                <ProviderIcon
+                  source={require("../../assets/images/auth/email.svg")}
+                />
+              }
+              variant="outline"
+              style={styles.signInMethod}
+            />
+            <Button
+              label="Sign in with SSO"
+              onPress={() => onSignIn("sso")}
+              disabled={busy}
+              leading={
+                <ProviderIcon
+                  source={require("../../assets/images/auth/sso.svg")}
+                />
+              }
+              variant="outline"
+              style={styles.signInMethod}
+            />
+          </View>
         </View>
-        <Text style={styles.subtitle}>Meetings, remembered.</Text>
-        <Text style={styles.copy}>
-          Sign in to use the mobile companion with your Pro account.
-        </Text>
       </View>
-
-      <Button
-        label="Sign in"
-        onPress={onSignIn}
-        disabled={busy}
-        loading={busy}
-        size="large"
-        style={styles.cta}
-      />
     </SafeAreaView>
+  );
+}
+
+function ProviderIcon({ source }: { source: number }) {
+  return (
+    <Image contentFit="contain" source={source} style={styles.providerIcon} />
   );
 }
 
@@ -182,18 +256,39 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     paddingHorizontal: Spacing.lg,
   },
+  brandBackground: {
+    backgroundColor: Colors.brandBackgroundTop,
+    experimental_backgroundImage: Gradients.brandBackground,
+  },
   body: {
     flex: 1,
     justifyContent: "center",
+  },
+  signInMethodsScreen: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  signInMethods: {
+    padding: Spacing.md,
+    paddingBottom: Spacing.lg,
+    borderRadius: Radius.sheet,
+    borderCurve: CornerCurve.squircle,
+    backgroundColor: Colors.surface,
+  },
+  signInMethodList: {
+    gap: Spacing.sm,
+  },
+  signInMethod: {
+    width: "100%",
+  },
+  providerIcon: {
+    width: 18,
+    height: 18,
   },
   titleRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
-  },
-  title: {
-    ...Typography.largeTitle,
-    color: Colors.ink,
   },
   paywallTitle: {
     flexShrink: 1,
@@ -206,11 +301,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     borderCurve: CornerCurve.squircle,
     backgroundColor: Colors.accent,
-  },
-  subtitle: {
-    marginTop: Spacing.sm,
-    ...Typography.section,
-    color: Colors.ink,
   },
   copy: {
     marginTop: Spacing.md,
