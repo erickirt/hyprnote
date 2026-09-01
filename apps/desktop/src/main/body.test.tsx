@@ -289,6 +289,9 @@ describe("ClassicMainBody", () => {
       "after:w-2",
     );
     expect(screen.getByTestId("resize-handle").dataset.className).toContain(
+      "cursor-ew-resize",
+    );
+    expect(screen.getByTestId("resize-handle").dataset.className).toContain(
       "w-1",
     );
 
