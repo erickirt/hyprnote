@@ -4968,6 +4968,7 @@ msgid "Transcription complete"
 msgstr "Transcription complete"
 
 #: src/session/components/note-input/transcript/screens/empty.tsx
+#: src/stt/useRunBatch.ts
 msgid "Transcription failed"
 msgstr "Transcription failed"
 
