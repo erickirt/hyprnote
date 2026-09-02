@@ -14,7 +14,7 @@ import {
   finishScheduledAutoStart,
   takeScheduledAutoJoin,
 } from "~/stt/scheduled-auto-start-state";
-import { useStartListening } from "~/stt/useStartListening";
+import { useStartListeningState } from "~/stt/useStartListening";
 
 export function ScheduledSessionAutoStart({
   sessionId,
@@ -67,9 +67,33 @@ function PendingScheduledSessionAutoStart({
 }
 
 function ReadyScheduledSessionAutoStart({ sessionId }: { sessionId: string }) {
-  const startListening = useStartListening(sessionId);
-  const startListeningRef = useLatestRef(startListening);
+  const { connectionReady, startListening } = useStartListeningState(sessionId);
   const attemptedRef = useRef(false);
+
+  useMountEffect(() => {
+    const timeout = setTimeout(() => clearPendingAutoStart(sessionId), 30_000);
+    return () => clearTimeout(timeout);
+  });
+
+  return connectionReady ? (
+    <StartScheduledSessionAutoStart
+      attemptedRef={attemptedRef}
+      sessionId={sessionId}
+      startListening={startListening}
+    />
+  ) : null;
+}
+
+function StartScheduledSessionAutoStart({
+  attemptedRef,
+  sessionId,
+  startListening,
+}: {
+  attemptedRef: { current: boolean };
+  sessionId: string;
+  startListening: () => Promise<void>;
+}) {
+  const startListeningRef = useLatestRef(startListening);
 
   useMountEffect(() => {
     if (attemptedRef.current) {
