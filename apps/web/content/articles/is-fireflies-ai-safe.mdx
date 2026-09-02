@@ -1,180 +1,117 @@
 ---
-meta_title: "Is Fireflies AI Safe? The No BS Truth"
-meta_description: "Thinking about using Fireflies AI? We dug into their data collection practices and found some red flags you should know about."
+meta_title: "Is Fireflies AI Safe? What Its Current Privacy Policy Actually Says"
+meta_description: "We read Fireflies' current privacy policy, terms of service, and security page. Here's what it actually collects, what changed, and what's still worth knowing before you use it."
 author:
   - "John Jeong"
 featured: false
 category: "Comparisons"
-date: "2025-09-23"
+date: "2026-09-02"
 ---
 
-You're in a Zoom call when suddenly "Fred from Fireflies" joins the meeting. That little bot starts recording everything you say, transcribing your conversation, and promising to send you a nice summary afterward.
+"Fred from Fireflies" joins your call, records the conversation, and sends everyone a summary afterward. Convenient, until you start wondering where that recording goes and who can see it.
 
-It's convenient. Until you start wondering: where do all those recordings actually go? And what exactly is Fireflies doing with them?
+So I read Fireflies' current privacy policy, terms of service, and security page. Fireflies has changed a fair amount since I last covered it, adding a real bot-free capture option and a formal Zero Data Retention commitment for meeting content. Some of the older concerns about broad data collection and sharing still hold up. Here's what's actually true today, sourced from Fireflies' own documents.
 
-We decided to find out.
+## What Is Fireflies AI Today?
 
-## What Is Fireflies AI?
+![Fireflies' security page listing its SOC 2 Type II, GDPR, and HIPAA certifications alongside its Zero Data Retention policy](/images/blog/articles/is-fireflies-ai-safe/fireflies-security-compliance.png)
 
-![Fireflies](/images/blog/articles/is-fireflies-ai-safe/fireflies-1.webp)
+Fireflies is a cloud meeting assistant that has traditionally worked by sending the "Fireflies.ai Notetaker" bot into your Zoom, Google Meet, or Microsoft Teams call to record, transcribe, and summarize it. That's still the default experience for most users.
 
-Fireflies AI is a cloud-based service that automatically joins your video calls as a bot participant. It records everything, transcribes the conversation, and uses AI to create summaries and insights. The bot integrates with popular platforms like Zoom, Google Meet, and Microsoft Teams.
+Two things changed this year. Fireflies now offers a **Google Meet SDK integration** that records natively without a visible bot (a consent banner appears instead), and a **desktop "Take Notes" mode** that captures system audio with no bot at all. Both drop features (no speaker labels, no Sales Assist, and the SDK path needs a participant to approve first); the bot is still the only path to the full feature set, including CRM sync and Live Assist.
 
-Everything gets processed on Fireflies' servers, not your device. Your conversations become their data. [Otter AI raises similar concerns](/blog/is-otter-ai-safe/) with its own cloud-based recording practices.
+Everything you record, whether through the bot or the bot-free paths, is still processed on Fireflies' servers, not your device.
 
-## What does Fireflies actually do with your data?
+## What Fireflies Actually Collects
 
-I went through their privacy policy and terms of service. Here's what I found.
+Fireflies' [privacy policy](https://fireflies.ai/privacy-policy) (last updated March 6, 2026) is broader than most people expect from a note-taking tool:
 
-### 1. They're collecting everything about you
+**From meetings:** audio and visual recordings, transcripts, summaries, participant names and emails, meeting titles and URLs.
 
-**Your meetings and more:**
+**From your account:** name, company, email, phone number, physical address, and payment details.
 
-- Complete audio recordings of every conversation
-- Full transcripts and meeting summaries
-- Your calendar data and scheduling details
-- Information about everyone who attended
+**Automatically:** IP address, browser and device data, usage logs, and approximate location inferred from your IP.
 
-**Your personal details:**
+**From integrations:** if you connect Google Calendar, Slack, or similar tools, Fireflies can access "any content that you have provided to and stored in your Third-Party Account", including contacts and calendar data, depending on the integration you enable.
 
-- Name, company, email, home address, phone number
-- Account passwords and login information
-- Payment and billing data
+Fireflies also discloses personal information to categories of third parties, per its state-privacy-law disclosures: vendors and service providers, integration partners, corporate affiliates, law enforcement when legally required, professional advisors, and parties involved in a corporate transaction such as an acquisition.
 
-**Your digital footprint:**
+None of this is unusual for a cloud SaaS product. It's the same broad collection pattern most bot-based transcription tools use, since the bot needs calendar and platform access to function.
 
-- Your exact location
-- Your device IDs and MAC address
-- What you search for and click on
-- Your network information and browsing habits
+## What Fireflies Has Fixed
 
-**Access to your other accounts:**
+The most significant change since this was last written: Fireflies now states plainly that it does **not use personal information to train AI models**, and contractually prohibits its vendors from doing so with your data either. Its terms of service go further, stating Fireflies "will not use your User Content to train, retrain, fine-tune or otherwise improve any generative artificial intelligence models".
 
-When you connect Google Calendar or other services, Fireflies can access and store "any content that you have provided to and stored in your Third-Party Account" - including your contact lists.
+For meeting content specifically, Fireflies applies what it calls a **Zero Data Retention** policy: audio, video, transcripts, and summaries are not stored by any third-party vendor after processing, not accessed by a vendor once the service completes, and not used for training. Account-level personal information (your name, email, billing info) follows a separate rule: it's kept while your account is active and deleted within 30 days of account closure.
 
-### 2. The fine print that should worry you
+Fireflies also holds SOC 2 Type II, GDPR, and HIPAA certifications (HIPAA specifically as an Enterprise-plan add-on, more on that below), runs a public bug bounty program, and offers meeting-level sharing controls, including a "Only Owner" setting that restricts a recap to just you.
 
-**They're not responsible if their AI messes up:** Their terms explicitly say that while they use AI to process your conversations, "Fireflies is not liable for any loss or harm resulting from the user's use of AI." If something goes wrong with how they handle your data, you're on your own.
+## Where the Real Friction Still Is
 
-**Your data becomes theirs forever:** Fireflies keeps "all rights to aggregated and anonymous data derived from your use of the Service" with no expiration date. Even if they can't identify you personally, they own insights from your conversations permanently.
+![Fireflies' meeting recap sharing settings, with 'Teammates & anyone with the link' set as the default access level](/images/blog/articles/is-fireflies-ai-safe/fireflies-recap-sharing-defaults.png)
 
-**They share your data widely:** Your information gets shared with their business partners, service providers, any company that might buy Fireflies in the future, or government authorities if they think it's necessary.
+**The default sharing setting is wider than most people expect.** Out of the box, new meeting recaps use "Teammates & anyone with the link": anyone in your Fireflies workspace can see the meeting under their #AllMeetings tab, even if they weren't invited, and anyone who gets forwarded the link can open it. You can tighten this per meeting or set a stricter workspace default (Only Participants, Only Teammates, or Only Owner), but you have to do it yourself.
 
-**You're legally responsible for everything:** Their terms say "You are responsible for compliance with all recording laws." If you accidentally record someone without consent, that's your legal problem, not theirs. This becomes especially problematic when users can't actually control when Fireflies records—you're still legally liable even if their bot shows up uninvited.
+**Fireflies still grants itself a broad license to your content.** Its terms give Fireflies a "nonexclusive, royalty-free, worldwide, fully paid, and sublicensable" license to your recordings and transcripts, described as perpetual and irrevocable. That license is contractually scoped to providing you the service and explicitly excludes AI training, but it's still broader than most people assume they're signing up for.
 
-### 3. Their liability? Basically nothing
+**Liability is capped low.** If something goes wrong, Fireflies' maximum liability is the greater of $100 or what you paid in the past six months. A leaked confidential meeting doesn't come with meaningful financial recourse.
 
-Even if Fireflies completely screws up and causes major damage, their maximum liability is capped at either what you paid them in the last six months or $100—whichever is less. Your confidential business meeting gets leaked and costs you a major client, and Fireflies owes you maybe $100.
+**Recording consent is still your responsibility.** Fireflies' terms require every meeting participant to consent to being recorded, and that obligation sits with you, the host, not with Fireflies, even when the bot joined automatically through a calendar integration you set up once and forgot about.
 
-## Real privacy problems users are experiencing with Fireflies AI
+**HIPAA compliance requires the Enterprise plan.** Fireflies' security page markets HIPAA compliance as a general badge, but its own pricing page lists HIPAA compliance, private storage, and custom data retention as Enterprise-only additions on top of Business. Free, Pro, and Business customers don't get it by default.
 
-The privacy policy issues aren't just theoretical. Real users are reporting some concerning problems:
+A recent review analysis from [Unstar](https://unstar.app/blog/otter-fireflies-notta-rev-tactiq-ai-meeting-transcription-apps-ranked-2026), based on app-store and review-site complaint patterns, flags two more Fireflies-specific friction points. Its CRM auto-logging occasionally attaches meeting notes to the wrong Salesforce or HubSpot record when email domains or attendee lists are ambiguous. And its bot can keep recording after the original host leaves a call while other attendees stay connected, an unintentional but real gap for calls that outlast the host.
 
-### 1. It won't go away
+## The Bot-Free Option, and Its Limits
 
-![Fireflies won't go away](/images/blog/articles/is-fireflies-ai-safe/fireflies-2.webp)
+![The consent banner Fireflies shows when recording through its Google Meet SDK integration instead of sending a visible bot](/images/blog/articles/is-fireflies-ai-safe/fireflies-botfree-consent-banner.png)
 
-Source: [Reddit](https://www.reddit.com/r/sales/comments/1gw2xpk/how_to_uninvite_fireflies_from_my_meetings/)
+If you want to avoid a visible bot, Fireflies' Google Meet SDK integration and desktop "Take Notes" system-audio mode both work without one. The SDK path still requires one participant to explicitly approve the recording banner shown above, and any attendee can revoke it mid-call. That's a genuine improvement over always sending a bot into the meeting. It comes with tradeoffs too: no speaker labels, no Sales Assist, and, for Take Notes, no separate audio or video file, only a transcript and summary.
 
-Multiple people report that Fireflies keeps showing up in their meetings even after they deactivated their accounts, tried to uninstall it, asked their IT department for help, or explicitly requested it to stop recording. One user described it as "trying to remove a deer tick from your leg—messy and painful."
+## Should You Trust Fireflies With Sensitive Information?
 
-### 2. It shares transcripts with people who never signed up
+**Use the Enterprise plan, tighten sharing defaults, and confirm a BAA for:**
 
-![Fireflies shares transcripts without permission](/images/blog/articles/is-fireflies-ai-safe/fireflies-3.webp)
-
-Source: [Reddit](https://www.reddit.com/r/SaaS/comments/1dznmxo/fireflies_is_a_nightmare/)
-
-Fireflies automatically sends meeting summaries to everyone on the calendar invite, including people who never consented to being recorded, external clients and partners, former employees who still have access to recurring meetings, and anyone who happened to be invited but didn't even attend.
-
-### 3. It installs itself without permission
-
-![Fireflies installs itself without permission](/images/blog/articles/is-fireflies-ai-safe/fireflies-4.webp)
-
-Source: [Reddit](https://www.reddit.com/r/SaaS/comments/1dznmxo/fireflies_is_a_nightmare/)
-
-Several users report that just by joining a meeting where someone else used Fireflies, the software somehow installed itself on their computers and started recording their future meetings without their knowledge.
-
-## Should I trust Fireflies with sensitive information?
-
-**Definitely avoid Fireflies for:**
-
-- Healthcare discussions with patient information
+- Healthcare discussions involving patient information
 - Legal meetings requiring attorney-client privilege
 - Financial services conversations with client data
-- Any government or defense-related discussions
-- International calls with people protected by GDPR
-- Client consultations involving confidential business information
 
-**Use extreme caution for:**
+**Set your workspace default to "Only Participants" or "Only Owner" before using it for:**
 
-- Internal team meetings with sensitive company information
-- Job interviews or HR discussions
-- Sales calls with prospect data
+- Internal meetings with sensitive company information
+- HR discussions, performance reviews, or job interviews
 - Executive or board-level conversations
 
-**Use for:**
+**The default settings are fine for:**
 
 - Public webinars or presentations
 - Non-confidential training sessions
-- Casual team social meetings
+- Casual team or social meetings
 
-Even then, everyone in the meeting needs to consent to being recorded, and you're legally responsible if they don't.
+Whatever the setting, every participant still needs to consent to being recorded, and that responsibility is yours, not Fireflies'.
 
-&nbsp;
+## A Private Alternative: Anarlog
 
-## Is there a safer Fireflies alternative?
+If you'd rather not route meeting content through a cloud vendor at all, [local AI meeting notetakers](/blog/local-ai-meeting-notes/) process everything on your device instead.
 
-If you need AI-powered meeting transcription but don't want to hand over your conversations to a cloud service, there's a better way. [Local AI meeting notetakers](/blog/local-ai-meeting-notes/) process everything on your device.
+![Anarlog's meeting summary view](/images/blog/library/products/anarlog/desktop/2026-08-20-meeting-summary.jpg)
 
-### Meet Anarlog: Zero lock-in AI note-taker
+Anarlog is an open-source AI notepad for meetings that stores your canonical meeting record locally in SQLite instead of a vendor-hosted workspace. Markdown export is available when you want a portable copy. See our [Fireflies AI Alternatives](/blog/fireflies-ai-alternatives) article for a full Anarlog-vs-Fireflies comparison.
 
-![Anarlog](/images/blog/library/products/anarlog/desktop/2026-08-20-meeting-summary.jpg)
+**Your choice of AI stack:** managed cloud service ($15/month or $150/year), bring your own API keys, or run local models via Ollama. You choose which AI provider touches your data, not a single vendor.
 
-Anarlog is an open-source AI notepad for meetings with a local SQLite meeting record and a choice of AI stack. Markdown export is available when you need a portable copy. Compare each product's processing, retention, and integrations against your own requirements.
+**Bot-free on every platform by default:** Anarlog captures system audio and microphone directly on Zoom, Teams, Google Meet, phone calls, or in-person conversations, without a bot joining and without needing a separate SDK integration per platform.
 
-Check out our [Fireflies AI Alternatives](/blog/fireflies-ai-alternatives) article for a detailed Anarlog vs Fireflies review.
+**You control distribution:** export to Markdown, PDF, or rich text, and connect the tools you already use. No vendor-hosted recap link that defaults to being visible to your whole workspace.
 
-### How Anarlog keeps you safe:
+**What Anarlog itself collects, for the same transparency this article asks of Fireflies:** pseudonymous usage and diagnostic data, device and log data, whatever content you deliberately send to optional cloud features (hosted transcription, AI, sharing, or connectors), website analytics, and payment data processed by Stripe. Meeting audio, transcripts, notes, and summaries aren't part of Anarlog's own analytics or telemetry. [Read Anarlog's privacy policy](/privacy) for the full breakdown.
 
-**Your choice of AI stack:**
-
-Managed cloud service ($15/mo), bring your own API keys, or run local models via Ollama. You choose which AI processes your data—not Fireflies.
-
-**Universal compatibility without bots:**
-
-Works with any meeting platform (Zoom, Teams, Google Meet, etc.) without joining your meetings as a bot. Records both your microphone and system audio directly, and works for in-person meetings too.
-
-**You control your data:**
-
-Export to Markdown, PDF, or rich text. Integrate with tools you already use like Obsidian or Attio. Connect to any AI provider you choose—OpenAI, Mistral, or custom endpoints. No vendor lock-in.
-
-**Built for controlled deployments:**
-
-A local-only configuration can keep capture, transcription, and summarization on-device. That can reduce vendor scope, but it does not replace consent, device security, access controls, audit requirements, or a review of any cloud services you enable.
-
-**Enterprise-ready:**
-
-For sensitive work, configure local processing where appropriate and complete a security and compliance review for every AI, CloudSync, and sharing service you enable.
-
-### What Anarlog collects (for full transparency):
-
-Unlike Fireflies, Anarlog keeps canonical meeting content local by default. Its privacy policy separately describes pseudonymous usage data, device and log data, optional cloud features, and the services those features use:
-
-- **Usage and diagnostics:** Pseudonymous product events, device information, logs, and sanitized crash reports
-- **Cloud features:** Content you deliberately send to hosted transcription, AI, sharing, or connectors
-- **Website interactions:** Analytics, support, and feedback activity
-- **Payment info:** Processed by Stripe for paid users
-
-Analytics and telemetry are designed not to include meeting audio, transcripts, notes, or summaries. Cloud transcription, AI, sharing, and connectors process the content required for the feature you enable.
-
-[Check Anarlog's take on Privacy](/privacy)
+A local-only configuration reduces how much of your meeting content leaves your device, but it doesn't replace getting consent, securing your own device, or reviewing every cloud feature you turn on.
 
 ## Is Fireflies AI Safe?
 
-Fireflies AI might seem convenient, but convenience comes at a steep privacy cost. Their extensive data collection, broad sharing permissions, minimal liability, and documented issues with user control make it risky for most business conversations.
+Safer than it looked a year ago, and more honest about it. Zero Data Retention for meeting content, no AI training on personal data, and real bot-free capture options are genuine improvements worth crediting. The parts still worth knowing before you rely on it: a broad default sharing setting, a low liability cap, a broad (if scoped) content license, and HIPAA compliance that's gated behind the Enterprise plan.
 
-If you need AI-powered meeting assistance, choose a solution with zero lock-in that gives you complete control. Anarlog proves you don't have to sacrifice ownership for functionality.
-
-Your conversations are valuable. Don't give them away for free.
+None of that makes Fireflies unsafe to use. It makes it a tool where the defaults deserve five minutes of attention before your first sensitive meeting, and where checking the current policy yourself beats taking anyone's older writeup, including this one, at face value.
 
 &nbsp;
