@@ -13,6 +13,7 @@ const {
   setRecordingIndicatorMock,
   startCaptureMock,
   stopCaptureMock,
+  stopTranscriptionMock,
   vaultBaseMock,
 } = vi.hoisted(() => ({
   dispatchEventMock: vi.fn(),
@@ -26,6 +27,7 @@ const {
   setRecordingIndicatorMock: vi.fn(),
   startCaptureMock: vi.fn(),
   stopCaptureMock: vi.fn(),
+  stopTranscriptionMock: vi.fn(),
   vaultBaseMock: vi.fn(),
 }));
 
@@ -70,7 +72,7 @@ vi.mock("@anlg/plugin-transcription", () => ({
     startCapture: startCaptureMock,
     startTranscription: vi.fn(),
     stopCapture: stopCaptureMock,
-    stopTranscription: vi.fn(),
+    stopTranscription: stopTranscriptionMock,
     updateCaptureConfig: vi.fn(),
   },
   events: {
@@ -126,6 +128,7 @@ describe("General Listener Slice", () => {
     setRecordingIndicatorMock.mockResolvedValue({ status: "ok", data: null });
     startCaptureMock.mockResolvedValue({ status: "ok", data: null });
     stopCaptureMock.mockResolvedValue({ status: "ok", data: null });
+    stopTranscriptionMock.mockResolvedValue({ status: "ok", data: null });
     dispatchEventMock.mockResolvedValue({ status: "ok", data: 1 });
     vaultBaseMock.mockResolvedValue({ status: "ok", data: "/tmp/anarlog" });
   });
@@ -704,12 +707,46 @@ describe("General Listener Slice", () => {
       });
       expect(getSessionMode(sessionId)).toBe("inactive");
     });
+
+    test("late progress cannot restart a stopped batch", () => {
+      const sessionId = "session-batch-stopped";
+      const { handleBatchResponseStreamed, handleBatchStopped } =
+        store.getState();
+
+      handleBatchStopped(sessionId);
+      handleBatchResponseStreamed(sessionId, {
+        type: "progress",
+        percentage: 0.5,
+        partial_text: "late progress",
+      });
+
+      expect(store.getState().batch[sessionId]).toEqual({
+        percentage: 0,
+        error: "Transcription stopped.",
+        isComplete: false,
+        terminalReason: "stopped",
+        errorCode: undefined,
+      });
+      expect(store.getState().getSessionMode(sessionId)).toBe("inactive");
+    });
   });
 
   describe("Stop Action", () => {
     test("stop action exists and is callable", () => {
       const stop = store.getState().stop;
       expect(typeof stop).toBe("function");
+    });
+
+    test("marks batch transcription stopped as soon as native cancellation succeeds", async () => {
+      store.getState().handleBatchStarted("session-1");
+
+      await store.getState().stopTranscription("session-1");
+
+      expect(stopTranscriptionMock).toHaveBeenCalledWith("session-1");
+      expect(store.getState().getSessionMode("session-1")).toBe("inactive");
+      expect(store.getState().batch["session-1"]?.terminalReason).toBe(
+        "stopped",
+      );
     });
 
     test("marks the live session finalizing immediately when stop is requested", () => {
