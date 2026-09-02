@@ -10,9 +10,10 @@ Use hosted Cloud MCP as the default. Fill gaps from the local `anarlog` CLI when
 ## Choose a source
 
 1. If Cloud MCP tools are connected, call them first: `list_meetings`, `get_meeting`, `get_meeting_transcript`, and `get_recurring_meeting_history`.
-2. If Cloud returns no match, snapshots are disabled, or the user is asking about a meeting that only exists on this machine, use `anarlog --json` against the local database.
-3. Use a local `anarlog mcp` stdio server only to fill those same gaps. Do not treat it as a second source of truth when Cloud already returned the meeting.
-4. If neither Cloud nor the local CLI is available, direct the user to enable **Cloud API & Connectors** and [installation](https://docs.anarlog.so/installation). Do not install software unless the user asks.
+2. If MCP is unavailable but CLI login is available, use `anarlog --json meetings --source cloud ...` for the same hosted snapshots.
+3. If Cloud returns no match, snapshots are disabled, or the user is asking about a meeting that only exists on this machine, use local `anarlog --json meetings ...` commands.
+4. Use a local `anarlog mcp` stdio server only to fill those same gaps. Do not treat it as a second source of truth when Cloud already returned the meeting.
+5. If neither Cloud nor the local CLI is available, direct the user to enable **Cloud API & Connectors** and [installation](https://docs.anarlog.so/installation). Do not install software unless the user asks.
 
 Never query or modify Anarlog's SQLite database directly. The CLI and MCP servers handle application-schema compatibility.
 

@@ -29,6 +29,11 @@ pub async fn run(command: &AuthCommand, json: bool) -> Result<()> {
     }
 }
 
+pub(crate) fn current_session() -> Result<Option<Session>> {
+    let store = AuthStore::new(Environment::current().bundle_id)?;
+    storage::find_session(&store.load()?.data)
+}
+
 async fn login(store: &AuthStore, environment: Environment, json: bool) -> Result<()> {
     let login_url = login_url(environment.scheme)?;
     if json {

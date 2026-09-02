@@ -8,6 +8,7 @@ Cloud MCP is read-only. Local MCP adds proposal tools, which insert or decline s
 | `get_meeting`                   | Read metadata, canonical note, summaries, participants, and action items.                                                  |
 | `get_meeting_transcript`        | Read a transcript page. Start with `limit: 200`; continue from `pagination.next_offset` only as needed.                    |
 | `get_recurring_meeting_history` | Find meetings from the same recurring series as a known meeting.                                                           |
+| `export_meeting`                | Read the complete meeting record including transcripts. Use only when smaller reads are insufficient.                      |
 | `propose_summary_edit`          | Stage a complete summary replacement. Pass `target_id` when multiple summaries exist.                                      |
 | `propose_memo_edit`             | Stage a complete memo replacement.                                                                                         |
 | `list_proposals`                | List staged proposals. Defaults to `status: pending`.                                                                      |

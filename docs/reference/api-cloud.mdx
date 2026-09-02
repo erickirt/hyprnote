@@ -69,12 +69,13 @@ The Streamable HTTP endpoint is:
 https://api.anarlog.so/mcp
 ```
 
-It exposes the same four read-only tools as the local MCP server:
+It exposes the same five meeting-read tools as the local MCP server:
 
 - `list_meetings`
 - `get_meeting`
 - `get_meeting_transcript`
 - `get_recurring_meeting_history`
+- `export_meeting`
 
 Hosts that support MCP OAuth 2.1 connect your Anarlog account without a cloud API key. The host discovers Anarlog's authorization server from the MCP endpoint, opens the Anarlog sign-in and consent flow, and stores the resulting connection.
 

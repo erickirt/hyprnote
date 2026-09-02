@@ -386,6 +386,7 @@ dependencies = [
  "tokio",
  "url",
  "user-error",
+ "wiremock",
 ]
 
 [[package]]

@@ -64,7 +64,9 @@ pub struct DeclineProposalInput {
     pub proposal_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, utoipa::ToSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type, utoipa::ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct Proposal {
     pub id: String,
@@ -81,7 +83,9 @@ pub struct Proposal {
     pub diff: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, utoipa::ToSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type, utoipa::ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct ProposalPage {
     pub proposals: Vec<Proposal>,

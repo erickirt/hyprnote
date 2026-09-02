@@ -7,11 +7,14 @@ Use the global `--json` flag whenever an agent consumes CLI output.
 
 A successful response contains `schema_version`, `command`, `data`, and optional `pagination`. Read results from `data`. Follow `pagination.next_offset` only when you need another page.
 
+Meeting reads default to the local database. Use `meetings --source cloud` after `anarlog auth login` to read opted-in Cloud snapshots, or `meetings --source auto` to use Cloud only when the local database is absent.
+
 ## Resolve meeting context
 
 ```bash
 anarlog --json meetings list --query "weekly planning" --limit 10
 anarlog --json meetings get MEETING_ID
+anarlog --json meetings --source cloud list --query "weekly planning" --limit 10
 ```
 
 Search is case-insensitive across meeting titles and IDs. If several meetings match, ask the user to choose one.
@@ -60,6 +63,7 @@ Only export a complete meeting when the user explicitly requests a file:
 ```bash
 anarlog meetings export MEETING_ID --format markdown --output meeting.md
 anarlog meetings export MEETING_ID --format json --output meeting.json
+anarlog meetings --source cloud export MEETING_ID --format json --output meeting.json
 ```
 
 Export refuses to replace an existing file. Use `--force` only after the user explicitly approves overwriting that exact path.

@@ -18,7 +18,7 @@ anlg-user-error = { workspace = true }
 base64 = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 dirs = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["json", "query"] }
 rmcp = { workspace = true, features = ["server", "transport-io"] }
 rpassword = { workspace = true }
 schemars = { workspace = true }
@@ -38,3 +38,4 @@ insta = { workspace = true, features = ["json"] }
 rmcp = { workspace = true, features = ["client"] }
 sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
 tempfile = { workspace = true }
+wiremock = { workspace = true }

@@ -316,7 +316,8 @@ pub(crate) async fn delete_snapshot(
     responses(
         (status = 200, body = access::MeetingPage),
         (status = 401, body = crate::error::ErrorEnvelope),
-        (status = 403, body = crate::error::ErrorEnvelope)
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 429, body = String, description = "Cloud API rate limit exceeded")
     )
 )]
 pub(crate) async fn list_meetings(
@@ -375,7 +376,10 @@ pub(crate) async fn list_meetings_for_user(
     params(("meeting_id" = String, Path)),
     responses(
         (status = 200, body = access::Meeting),
-        (status = 404, body = crate::error::ErrorEnvelope)
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 429, body = String, description = "Cloud API rate limit exceeded")
     )
 )]
 pub(crate) async fn get_meeting(
@@ -399,7 +403,10 @@ pub(crate) async fn get_meeting(
     ),
     responses(
         (status = 200, body = access::TranscriptPage),
-        (status = 404, body = crate::error::ErrorEnvelope)
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 429, body = String, description = "Cloud API rate limit exceeded")
     )
 )]
 pub(crate) async fn get_transcript(
@@ -428,7 +435,10 @@ pub(crate) async fn get_transcript(
     ),
     responses(
         (status = 200, body = access::MeetingPage),
-        (status = 404, body = crate::error::ErrorEnvelope)
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 429, body = String, description = "Cloud API rate limit exceeded")
     )
 )]
 pub(crate) async fn get_history(
@@ -490,7 +500,10 @@ pub(crate) async fn history_for_user(
     responses(
         (status = 200, description = "Meeting export"),
         (status = 400, body = crate::error::ErrorEnvelope),
-        (status = 404, body = crate::error::ErrorEnvelope)
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 429, body = String, description = "Cloud API rate limit exceeded")
     )
 )]
 pub(crate) async fn export_meeting(
@@ -631,6 +644,27 @@ kHmPRiazukxPLb6ilpRAewjW8nihRANCAATDskChT+Altkm9X7MI69T3IUmrQU0L\n\
         .unwrap()
     }
 
+    fn session_token(issuer: &str) -> String {
+        let mut header = Header::new(Algorithm::ES256);
+        header.kid = Some(TEST_KEY_ID.to_string());
+        let expires_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 3_600;
+        encode(
+            &header,
+            &serde_json::json!({
+                "sub": "00000000-0000-0000-0000-000000000001",
+                "iss": issuer,
+                "aud": "authenticated",
+                "exp": expires_at,
+            }),
+            &EncodingKey::from_ec_pem(TEST_PRIVATE_KEY.as_bytes()).unwrap(),
+        )
+        .unwrap()
+    }
+
     fn export() -> access::MeetingExport {
         access::MeetingExport {
             meeting: access::Meeting {
@@ -733,13 +767,96 @@ kHmPRiazukxPLb6ilpRAewjW8nihRANCAATDskChT+Altkm9X7MI69T3IUmrQU0L\n\
         );
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let body = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
-        assert_eq!(body["result"]["tools"].as_array().unwrap().len(), 4);
+        assert_eq!(body["result"]["tools"].as_array().unwrap().len(), 5);
         assert!(
             body["result"]["tools"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .any(|tool| tool["name"] == "list_meetings")
+        );
+        assert!(
+            body["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["name"] == "export_meeting")
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_export_tool_returns_the_complete_snapshot() {
+        let server = MockServer::start().await;
+        let key = format!("anl_{}", "d".repeat(64));
+        let key_hash = Sha256::digest(key.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        Mock::given(method("POST"))
+            .and(path("/rest/v1/rpc/verify_cloud_api_key"))
+            .and(body_json(serde_json::json!({ "p_key_hash": key_hash })))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "user_id": "00000000-0000-0000-0000-000000000001",
+                    "status": "ok",
+                }])),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/rest/v1/rpc/read_cloud_api_snapshot"))
+            .and(body_json(serde_json::json!({
+                "p_user_id": "00000000-0000-0000-0000-000000000001",
+                "p_session_id": "meeting-1",
+            })))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "content_json": export(),
+                }])),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let state =
+            AppState::new(crate::CloudApiConfig::new(server.uri(), "service-role-key").unwrap());
+        let app = connector_router(state.clone()).route_layer(middleware::from_fn_with_state(
+            state,
+            crate::require_cloud_connector_auth,
+        ));
+
+        let response = app
+            .oneshot(
+                Request::post("/mcp")
+                    .header("host", "api.anarlog.so")
+                    .header("authorization", format!("Bearer {key}"))
+                    .header("content-type", "application/json")
+                    .header("accept", "application/json, text/event-stream")
+                    .header("mcp-protocol-version", "2025-11-25")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "tools/call",
+                            "params": {
+                                "name": "export_meeting",
+                                "arguments": { "meeting_id": "meeting-1" },
+                            },
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+        assert_eq!(body["result"]["structuredContent"]["id"], "meeting-1");
+        assert_eq!(
+            body["result"]["structuredContent"]["transcripts"][0]["text"],
+            "hello"
         );
     }
 
@@ -889,7 +1006,7 @@ kHmPRiazukxPLb6ilpRAewjW8nihRANCAATDskChT+Altkm9X7MI69T3IUmrQU0L\n\
             .respond_with(
                 ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "status": "ok" }])),
             )
-            .expect(1)
+            .expect(2)
             .mount(&server)
             .await;
         Mock::given(method("POST"))
@@ -899,7 +1016,7 @@ kHmPRiazukxPLb6ilpRAewjW8nihRANCAATDskChT+Altkm9X7MI69T3IUmrQU0L\n\
                     "content_json": export(),
                 }])),
             )
-            .expect(1)
+            .expect(2)
             .mount(&server)
             .await;
         let state =
@@ -930,6 +1047,31 @@ kHmPRiazukxPLb6ilpRAewjW8nihRANCAATDskChT+Altkm9X7MI69T3IUmrQU0L\n\
                 .unwrap()
                 .contains("error=\"invalid_token\"")
         );
+
+        let session = session_token(&issuer);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get("/v1/meetings")
+                    .header("authorization", format!("Bearer {session}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/mcp")
+                    .header("authorization", format!("Bearer {session}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
         let response = app
             .oneshot(

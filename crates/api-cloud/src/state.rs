@@ -97,6 +97,13 @@ impl AppState {
             .await
     }
 
+    pub(crate) async fn verify_session_token(
+        &self,
+        token: &str,
+    ) -> Result<anlg_api_auth::Claims, anlg_api_auth::AuthError> {
+        self.auth.verify_token(token).await
+    }
+
     async fn rpc<T: DeserializeOwned>(
         &self,
         function: &str,

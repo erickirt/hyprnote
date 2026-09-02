@@ -35,6 +35,19 @@ On Linux, the CLI uses Secret Service when it is available. Headless systems wit
 
 `auth status` reports the signed-in account and whether the current access token has expired. The stored refresh token lets the desktop app refresh an expired access token when it starts.
 
+## Meeting data sources
+
+Meeting commands accept `--source local|cloud|auto` before their subcommand:
+
+```bash
+anarlog meetings --source cloud list
+anarlog meetings --source auto get MEETING_ID
+```
+
+`local` is the default and reads Anarlog's database on this computer. `cloud` reads the opted-in hosted snapshots using the account saved by `anarlog auth login`. `auto` uses the local database when it exists and falls back to Cloud when it does not. Set `ANARLOG_SOURCE` to choose the same behavior without a flag.
+
+All meeting read commands support all three sources. `--base`, `--db-path`, and `doctor` apply only to local data. Proposals and `anarlog mcp` remain local because hosted Cloud access is read-only.
+
 ## Meeting commands
 
 | Command | Options | Result |

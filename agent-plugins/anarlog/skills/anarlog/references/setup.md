@@ -34,6 +34,8 @@ Run the Anarlog desktop app once so its local database exists. The CLI works whi
 
 Cloud sign-in does not require a graphical session on the Anarlog machine. Run `anarlog auth login`, open the printed URL in any browser, and paste the copied callback URL into the CLI prompt. Confirm the session with `anarlog auth status`. With `--json`, the login URL is printed to stderr and the callback is read from stdin.
 
+After login, `anarlog --json meetings --source cloud list` reads the same hosted snapshots as Cloud MCP. `--source auto` uses the local database when it exists and Cloud only when it does not.
+
 On Flatpak, the host command is `anarlog-cli`. On DEB, AppImage, macOS, Windows, and Settings-installed builds, the command is `anarlog`.
 
 Homebrew, standalone release binaries, and Windows package-manager distribution are not yet available.

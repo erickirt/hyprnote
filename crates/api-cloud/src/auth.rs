@@ -28,12 +28,29 @@ pub async fn require_cloud_connector_auth(
         return require_api_key(&state, &token, request, next).await;
     }
 
-    let claims = state
-        .verify_oauth_token(&token)
+    let claims = if request.uri().path().starts_with("/mcp") {
+        verify_oauth_token(&state, &token).await?
+    } else {
+        match state.verify_session_token(&token).await {
+            Ok(claims) => claims,
+            Err(_) => verify_oauth_token(&state, &token).await?,
+        }
+    };
+    enforce_user_status(&state, &claims.sub).await?;
+    request
+        .extensions_mut()
+        .insert(AuthContext { token, claims });
+
+    Ok(next.run(request).await)
+}
+
+async fn verify_oauth_token(state: &AppState, token: &str) -> Result<Claims, CloudApiError> {
+    state
+        .verify_oauth_token(token)
         .await
         .map_err(|error| match error {
             OAuthTokenError::Invalid => unauthorized(
-                &state,
+                state,
                 Some(("invalid_token", "Access token is invalid or expired")),
             ),
             OAuthTokenError::InsufficientScope => {
@@ -42,13 +59,7 @@ pub async fn require_cloud_connector_auth(
                     "Access token is missing a required scope",
                 ))))
             }
-        })?;
-    enforce_user_status(&state, &claims.sub).await?;
-    request
-        .extensions_mut()
-        .insert(AuthContext { token, claims });
-
-    Ok(next.run(request).await)
+        })
 }
 
 async fn require_api_key(

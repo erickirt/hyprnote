@@ -6,6 +6,8 @@ pub enum Error {
     DatabaseNotFound(std::path::PathBuf),
     #[error("output file already exists at {0}; pass --force to overwrite it")]
     OutputExists(std::path::PathBuf),
+    #[error("{message}")]
+    Cloud { code: &'static str, message: String },
     #[error("{action} failed: {reason}")]
     Operation {
         action: &'static str,
@@ -40,11 +42,19 @@ impl Error {
         }
     }
 
+    pub fn cloud(code: &'static str, message: impl Into<String>) -> Self {
+        Self::Cloud {
+            code,
+            message: message.into(),
+        }
+    }
+
     pub fn exit_code(&self) -> u8 {
         match self {
             Self::NotFound(_) => 2,
             Self::DatabaseNotFound(_) => 3,
             Self::OutputExists(_) => 4,
+            Self::Cloud { .. } => 1,
             Self::Operation { .. } => 1,
         }
     }
@@ -54,6 +64,7 @@ impl Error {
             Self::NotFound(_) => "not_found",
             Self::DatabaseNotFound(_) => "database_not_found",
             Self::OutputExists(_) => "output_exists",
+            Self::Cloud { code, .. } => code,
             Self::Operation { .. } => "operation_failed",
         }
     }

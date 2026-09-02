@@ -145,6 +145,32 @@ impl CloudMcpServer {
         .map_err(command_error)?;
         structured(&page)
     }
+
+    #[tool(
+        title = "Export meeting",
+        description = "Get a complete Anarlog meeting export with notes, summaries, participants, action items, and transcripts.",
+        output_schema = rmcp::handler::server::tool::schema_for_type::<access::MeetingExport>(),
+        meta = oauth_security_meta(),
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn export_meeting(
+        &self,
+        McpAuth(auth): McpAuth,
+        Parameters(input): Parameters<access::GetMeetingInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let Some(user_id) = user_id(auth) else {
+            return Ok(authentication_required(&self.state));
+        };
+        let export = read_export(&self.state, &user_id, &input.meeting_id)
+            .await
+            .map_err(command_error)?;
+        structured(&export)
+    }
 }
 
 #[tool_handler]
@@ -157,7 +183,7 @@ impl ServerHandler for CloudMcpServer {
                 env!("CARGO_PKG_VERSION"),
             ))
             .with_instructions(
-                "Read-only hosted access to the user's opted-in Anarlog meeting data. Start with list_meetings, then use get_meeting, get_meeting_transcript, and get_recurring_meeting_history. Every tool is idempotent and performs no writes. Report only meetings these tools return. If list_meetings is empty, say there are no opted-in Cloud snapshots. Never invent titles, dates, or ids.",
+                "Read-only hosted access to the user's opted-in Anarlog meeting data. Start with list_meetings, then use get_meeting, get_meeting_transcript, and get_recurring_meeting_history. Use export_meeting only when the task needs the complete record including transcripts. Every tool is idempotent and performs no writes. Report only meetings these tools return. If list_meetings is empty, say there are no opted-in Cloud snapshots. Never invent titles, dates, or ids.",
             )
     }
 }
@@ -233,6 +259,7 @@ mod tests {
             CloudMcpServer::get_meeting_tool_attr(),
             CloudMcpServer::get_meeting_transcript_tool_attr(),
             CloudMcpServer::get_recurring_meeting_history_tool_attr(),
+            CloudMcpServer::export_meeting_tool_attr(),
         ] {
             assert_eq!(
                 tool.meta.unwrap().get("securitySchemes"),

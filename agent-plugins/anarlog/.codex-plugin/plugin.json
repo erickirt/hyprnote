@@ -1,7 +1,7 @@
 {
   "name": "anarlog",
-  "version": "1.0.0",
-  "description": "Query Anarlog meetings through Cloud MCP, and fill gaps from the local CLI.",
+  "version": "1.1.0",
+  "description": "Query and export Anarlog meetings through Cloud MCP or the local CLI.",
   "author": {
     "name": "Fastrepl",
     "email": "founders@anarlog.so",
@@ -16,14 +16,15 @@
   "interface": {
     "displayName": "Anarlog",
     "shortDescription": "Query your meetings from anywhere",
-    "longDescription": "Connect your Anarlog account with OAuth, then find meetings and read notes, summaries, participants, action items, bounded transcript excerpts, and recurring history. Cloud MCP is read-only hosted snapshots. When a meeting is missing there, the bundled skill fills the gap from the local Anarlog CLI.",
+    "longDescription": "Connect your Anarlog account with OAuth, then find meetings and read notes, summaries, participants, action items, bounded transcript excerpts, recurring history, and complete exports when explicitly needed. Cloud MCP is read-only hosted snapshots. The bundled skill can also use authenticated Cloud reads or local data through the Anarlog CLI.",
     "developerName": "Fastrepl",
     "category": "Productivity",
     "capabilities": [
       "Find meetings",
       "Read notes and summaries",
       "Read bounded transcript excerpts",
-      "Review recurring meeting history"
+      "Review recurring meeting history",
+      "Export complete meeting records"
     ],
     "websiteURL": "https://anarlog.so",
     "privacyPolicyURL": "https://anarlog.so/privacy",

@@ -63,7 +63,7 @@ Start with `list_meetings`, then pass a returned `id` to `get_meeting`. Call `ge
 
 Transcript pages default to 200 words and cap at 500. Follow `pagination.next_offset` only when you need more context.
 
-Use `get_recurring_meeting_history` with a known meeting ID when a task depends on earlier meetings in the same series.
+Use `get_recurring_meeting_history` with a known meeting ID when a task depends on earlier meetings in the same series. Use `export_meeting` only when the task explicitly needs the complete record including transcripts.
 
 Cloud MCP is read-only. To persist an edit, use the local CLI or local MCP `propose_summary_edit` or `propose_memo_edit`. The tool returns a pending proposal. Do not claim the meeting changed. Use `list_proposals` and `get_proposal` to inspect staged work. `decline_proposal` discards a pending proposal; applied or already-declined proposals cannot be declined.
 

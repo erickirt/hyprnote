@@ -1,6 +1,6 @@
 # Anarlog agent plugin
 
-Query Anarlog meetings through hosted Cloud MCP and a bundled skill. The plugin finds meetings and reads notes, summaries, participants, action items, bounded transcript excerpts, and recurring history. When Cloud has no snapshot for a meeting, the skill fills the gap from the local `anarlog` CLI.
+Query Anarlog meetings through hosted Cloud MCP and a bundled skill. The plugin finds meetings and reads notes, summaries, participants, action items, bounded transcript excerpts, recurring history, and complete exports when explicitly needed. When Cloud has no snapshot for a meeting, the skill fills the gap from the local `anarlog` CLI.
 
 ## Prerequisites
 
@@ -10,7 +10,7 @@ Query Anarlog meetings through hosted Cloud MCP and a bundled skill. The plugin 
 
 On first use, the host discovers Anarlog's authorization server from `https://api.anarlog.so/mcp`, then opens the Anarlog sign-in and consent flow. No cloud API key is required.
 
-If a meeting is missing from Cloud, install the [Anarlog CLI](https://docs.anarlog.so/installation) so the skill can read the local database.
+If a meeting is missing from Cloud, install the [Anarlog CLI](https://docs.anarlog.so/installation) so the skill can read the local database. The CLI can also read hosted snapshots with `anarlog meetings --source cloud ...` after login.
 
 If you previously installed **Anarlog Cloud**, replace it with this plugin.
 

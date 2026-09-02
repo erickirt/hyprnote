@@ -1,6 +1,5 @@
 ---
 source: apps/cli/src/cli.rs
-assertion_line: 367
 expression: canonicalize_json(contract)
 ---
 {
@@ -111,6 +110,19 @@ expression: canonicalize_json(contract)
       "about": "Browse and export meetings",
       "name": "anarlog meetings",
       "options": [
+        {
+          "default": "local",
+          "flags": "--source",
+          "help": "Choose local data, hosted Cloud snapshots, or Cloud only when no local database exists",
+          "is_flag": false,
+          "possible_values": [
+            "local",
+            "cloud",
+            "auto"
+          ],
+          "required": false,
+          "value_name": "SOURCE"
+        },
         {
           "flags": "-h, --help",
           "help": "Print help",
@@ -323,7 +335,7 @@ expression: canonicalize_json(contract)
           "synopsis": "anarlog meetings export [--format] [-o] [--force] [-h] <id>"
         }
       ],
-      "synopsis": "anarlog meetings [-h] <command>"
+      "synopsis": "anarlog meetings [--source] [-h] <command>"
     },
     {
       "about": "Propose meeting edits for desktop review",

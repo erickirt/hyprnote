@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod cli;
+mod cloud;
 mod commands;
 mod db;
 mod error;
@@ -11,7 +12,7 @@ pub use cli::Args;
 pub use error::{Error, Result};
 pub use output::JSON_SCHEMA_VERSION;
 
-pub async fn run(args: Args) -> Result<u8> {
+pub async fn run(mut args: Args) -> Result<u8> {
     if let cli::Command::Auth { command } = &args.command {
         commands::auth::run(command, args.json).await?;
         return Ok(0);
@@ -23,22 +24,22 @@ pub async fn run(args: Args) -> Result<u8> {
     }
 
     let json = args.json;
-    let db = std::sync::Arc::new(if args.needs_write() {
-        db::open_write(&args).await?
-    } else {
-        db::open(&args).await?
-    });
-
-    match args.command {
+    let command = std::mem::replace(&mut args.command, cli::Command::Doctor);
+    match command {
         cli::Command::Auth { .. } => unreachable!("auth returns before opening the database"),
         cli::Command::Doctor => unreachable!("doctor returns before opening the database"),
-        cli::Command::Meetings { command } => {
-            commands::meetings::run(db.as_ref(), command, json).await?
+        cli::Command::Meetings { source, command } => {
+            let source = commands::meetings::DataSource::open(&args, source).await?;
+            commands::meetings::run(&source, command, json).await?
         }
         cli::Command::Proposals { command } => {
-            commands::proposals::run(db.as_ref(), command, json).await?
+            let db = db::open_write(&args).await?;
+            commands::proposals::run(&db, command, json).await?
         }
-        cli::Command::Mcp => mcp::serve(db).await?,
+        cli::Command::Mcp => {
+            let db = std::sync::Arc::new(db::open_write(&args).await?);
+            mcp::serve(db).await?
+        }
     }
 
     Ok(0)
@@ -92,6 +93,7 @@ mod tests {
             db_path: Some(db_path),
             json: false,
             command: cli::Command::Meetings {
+                source: cli::MeetingSource::Local,
                 command: cli::MeetingCommand::Export {
                     id: "meeting-1".to_string(),
                     format: cli::ExportFormat::Markdown,
