@@ -11,10 +11,12 @@ use super::{SourceFrame, SourceMsg, SourceState};
 
 const CAPTURE_FRAME_QUEUE_CAPACITY: usize = 32;
 
+/// Returns the settings the streams opened with so the routing watcher can start from the same
+/// verdict instead of sampling its own.
 pub(super) async fn start_source_loop(
     myself: &ActorRef<SourceMsg>,
     st: &mut SourceState,
-) -> Result<(), ActorProcessingErr> {
+) -> Result<CaptureSettings, ActorProcessingErr> {
     let new_mode = ChannelMode::determine(st.onboarding);
 
     let mode_changed = st.current_mode != new_mode;
@@ -40,20 +42,21 @@ pub(super) async fn start_source_loop(
         }
     }
 
-    result
+    result.map(|()| capture)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct CaptureSettings {
+pub(super) struct CaptureSettings {
     enable_aec: bool,
     /// Headphones keep speaker output out of the mic, so whatever the mic hears is the local
     /// user. Re-evaluated per stream because the source restarts on default output changes.
-    mic_isolated: bool,
+    pub(super) mic_isolated: bool,
 }
 
-// Headphones make AEC pure cost: it burns CPU and can degrade near-end speech.
+// Headphones make AEC pure cost: it burns CPU and can degrade near-end speech. The check covers
+// every output that is playing, not just the default, because meeting apps pick their own speaker.
 fn capture_settings() -> CaptureSettings {
-    let headphone_output = anlg_audio_device::default_output_headphone();
+    let headphone_output = anlg_audio_device::headphone_only_output();
     if let Some(device) = &headphone_output {
         tracing::info!(
             device = %device.name,
@@ -83,7 +86,6 @@ async fn start_streams(
     let myself2 = myself.clone();
     let mic_muted = st.mic_muted.clone();
     let mic_device = st.mic_device.clone();
-    let speaker_device = st.speaker_device.clone();
     let audio = st.audio.clone();
     let (frame_tx, frame_rx) = tokio::sync::mpsc::channel(CAPTURE_FRAME_QUEUE_CAPACITY);
     let wake_pending = st.capture_wake_pending.clone();
@@ -99,7 +101,6 @@ async fn start_streams(
             cancel_token: stream_cancel_token,
             mic_muted,
             mic_device,
-            speaker_device,
             enable_aec: capture.enable_aec,
             audio,
             frame_tx,
@@ -118,7 +119,6 @@ struct StreamContext {
     cancel_token: CancellationToken,
     mic_muted: std::sync::Arc<std::sync::atomic::AtomicBool>,
     mic_device: Option<String>,
-    speaker_device: Option<String>,
     enable_aec: bool,
     audio: std::sync::Arc<dyn AudioProvider>,
     frame_tx: tokio::sync::mpsc::Sender<SourceFrame>,
@@ -155,15 +155,11 @@ async fn run_stream_loop(ctx: StreamContext, mode: ChannelMode) {
                 sample_rate,
                 chunk_size,
                 mic_device: ctx.mic_device.clone(),
-                speaker_device: ctx.speaker_device.clone(),
                 enable_aec: ctx.enable_aec,
             };
             ctx.audio.open_capture(config)
         }
-        ChannelMode::SpeakerOnly => {
-            ctx.audio
-                .open_speaker_capture(ctx.speaker_device.clone(), sample_rate, chunk_size)
-        }
+        ChannelMode::SpeakerOnly => ctx.audio.open_speaker_capture(sample_rate, chunk_size),
         ChannelMode::MicOnly => {
             ctx.audio
                 .open_mic_capture(ctx.mic_device.clone(), sample_rate, chunk_size)
