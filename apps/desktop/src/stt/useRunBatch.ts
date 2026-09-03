@@ -82,7 +82,6 @@ const DIRECT_BATCH_PROVIDERS: Set<TranscriptionParams["provider"]> = new Set([
   "gladia",
   "elevenlabs",
   "mistral",
-  "fireworks",
   "pyannote",
   "aquavoice",
   "cohere",
@@ -95,6 +94,7 @@ const DIRECT_BATCH_PROVIDERS: Set<TranscriptionParams["provider"]> = new Set([
   "speechmatics",
   "together",
   "xai",
+  "smallestai",
 ]);
 
 export const STOPPED_TRANSCRIPTION_ERROR_MESSAGE = "Transcription stopped.";

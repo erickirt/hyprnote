@@ -21,11 +21,15 @@ const DEFAULT_EXTERNAL_STT_MODELS: Record<string, string> = {
   elevenlabs: "scribe_v2",
   mistral: "voxtral-mini-2602",
   pyannote: "parakeet-tdt-0.6b-v3",
-  aquavoice: "avalon-v1-en",
+  aquavoice: "avalon-v1.5",
   cohere: "cohere-transcribe-03-2026",
+  dashscope: "qwen3-asr-flash-realtime",
+  zai: "glm-asr-2512",
+  siliconflow: "FunAudioLLM/SenseVoiceSmall",
   fireworks: "whisper-v3-turbo",
   groq: "whisper-large-v3-turbo",
   xai: "xai-stt",
+  smallestai: "pulse",
   together: "openai/whisper-large-v3",
   speechmatics: "enhanced",
   azure_speech: "fast-transcription",
@@ -43,16 +47,39 @@ export function normalizeStoredSttModel(
   provider: string | undefined,
   model: string | undefined,
 ) {
-  if (provider === "assemblyai" && model === "universal") {
-    return "universal-3-5-pro";
+  if (provider === "assemblyai") {
+    if (model === "universal" || model === "universal-3-pro") {
+      return "universal-3-5-pro";
+    }
+    if (model === "u3-rt-pro") {
+      return "universal-3-5-pro-realtime";
+    }
   }
 
-  if (provider === "soniox") {
-    const alias = model?.match(/^stt-(?:async-|rt-)?v([3-5])$/);
-    if (alias) {
-      const version = alias[1] === "3" ? "4" : alias[1];
-      return `stt-rt-v${version}`;
-    }
+  if (provider === "aquavoice" && model === "avalon-v1-en") {
+    return "avalon-v1.5";
+  }
+
+  // Soniox removed v3 and v4 (v4 survives only as a server-side alias of v5).
+  if (provider === "soniox" && model?.match(/^stt-(?:async-|rt-)?v[3-5]$/)) {
+    return "stt-rt-v5";
+  }
+
+  // OpenAI retires the gpt-4o transcribe pair on 2027-02-26; gpt-transcribe
+  // is the documented replacement. The diarize variant has no successor yet.
+  if (
+    provider === "openai" &&
+    (model === "gpt-4o-transcribe" || model === "gpt-4o-mini-transcribe")
+  ) {
+    return "gpt-transcribe";
+  }
+
+  if (
+    provider === "openrouter" &&
+    (model === "openai/gpt-4o-transcribe" ||
+      model === "openai/gpt-4o-mini-transcribe")
+  ) {
+    return "openai/gpt-transcribe";
   }
 
   return model;
@@ -79,30 +106,48 @@ const normalizeSavedModel = (
   savedModel: string | undefined,
   models: ModelEntry[],
 ) => {
-  if (savedModel === "universal") {
-    if (models.some((model) => model.id === "universal-3-5-pro")) {
-      return "universal-3-5-pro";
-    }
-
-    if (models.some((model) => model.id === "universal-3-pro")) {
-      return "universal-3-pro";
-    }
-
-    if (models.some((model) => model.id === "u3-rt-pro")) {
-      return "u3-rt-pro";
-    }
+  if (
+    (savedModel === "universal" || savedModel === "universal-3-pro") &&
+    models.some((model) => model.id === "universal-3-5-pro")
+  ) {
+    return "universal-3-5-pro";
   }
 
-  const sonioxRealtimeAlias = savedModel?.match(
-    /^stt-(?:async-|rt-)?v([3-5])$/,
-  );
-  if (sonioxRealtimeAlias) {
-    const version =
-      sonioxRealtimeAlias[1] === "3" ? "4" : sonioxRealtimeAlias[1];
-    const realtimeModel = `stt-rt-v${version}`;
-    if (models.some((model) => model.id === realtimeModel)) {
-      return realtimeModel;
-    }
+  if (
+    savedModel === "u3-rt-pro" &&
+    models.some((model) => model.id === "universal-3-5-pro-realtime")
+  ) {
+    return "universal-3-5-pro-realtime";
+  }
+
+  if (
+    savedModel === "avalon-v1-en" &&
+    models.some((model) => model.id === "avalon-v1.5")
+  ) {
+    return "avalon-v1.5";
+  }
+
+  if (
+    savedModel?.match(/^stt-(?:async-|rt-)?v[3-5]$/) &&
+    models.some((model) => model.id === "stt-rt-v5")
+  ) {
+    return "stt-rt-v5";
+  }
+
+  if (
+    (savedModel === "gpt-4o-transcribe" ||
+      savedModel === "gpt-4o-mini-transcribe") &&
+    models.some((model) => model.id === "gpt-transcribe")
+  ) {
+    return "gpt-transcribe";
+  }
+
+  if (
+    (savedModel === "openai/gpt-4o-transcribe" ||
+      savedModel === "openai/gpt-4o-mini-transcribe") &&
+    models.some((model) => model.id === "openai/gpt-transcribe")
+  ) {
+    return "openai/gpt-transcribe";
   }
 
   return savedModel;

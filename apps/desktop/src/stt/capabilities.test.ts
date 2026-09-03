@@ -120,6 +120,9 @@ describe("getSttModelTranscriptionMode", () => {
     expect(
       getSttModelTranscriptionMode("cohere", "cohere-transcribe-03-2026"),
     ).toBe("batch");
+    expect(getSttModelTranscriptionMode("smallestai", "pulse-pro")).toBe(
+      "batch",
+    );
     for (const [provider, model] of [
       ["groq", "whisper-large-v3-turbo"],
       ["openrouter", "openai/gpt-4o-mini-transcribe"],
@@ -129,6 +132,9 @@ describe("getSttModelTranscriptionMode", () => {
       ["google_cloud", "latest_long"],
       ["aws_transcribe", "amazon-transcribe"],
       ["revai", "machine"],
+      ["pyannote", "parakeet-tdt-0.6b-v3"],
+      ["aquavoice", "avalon-v1.5"],
+      ["cohere", "cohere-transcribe-arabic-07-2026"],
     ]) {
       expect(getSttModelTranscriptionMode(provider, model)).toBe("batch");
     }
@@ -139,6 +145,7 @@ describe("getSttModelTranscriptionMode", () => {
       undefined,
     );
     expect(getSttModelTranscriptionMode("xai", "xai-stt")).toBeUndefined();
+    expect(getSttModelTranscriptionMode("smallestai", "pulse")).toBeUndefined();
   });
 });
 

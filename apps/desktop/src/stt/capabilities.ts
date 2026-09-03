@@ -177,7 +177,7 @@ export function getSttModelTranscriptionMode(
     return "batch";
   }
 
-  if (provider === "cohere" && model === "cohere-transcribe-03-2026") {
+  if (provider === "smallestai" && model === "pulse-pro") {
     return "batch";
   }
 
@@ -191,7 +191,10 @@ export function getSttModelTranscriptionMode(
     provider === "azure_speech" ||
     provider === "google_cloud" ||
     provider === "aws_transcribe" ||
-    provider === "revai"
+    provider === "revai" ||
+    provider === "pyannote" ||
+    provider === "aquavoice" ||
+    provider === "cohere"
   ) {
     return "batch";
   }
