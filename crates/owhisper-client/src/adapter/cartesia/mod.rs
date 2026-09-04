@@ -24,7 +24,7 @@ impl CartesiaAdapter {
 
     pub fn language_support_batch(languages: &[anlg_language::Language]) -> LanguageSupport {
         LanguageSupport::min(languages.iter().map(|language| {
-            if BATCH_LANGUAGE_CODES.contains(&language.iso639().code()) {
+            if BATCH_LANGUAGE_CODES.contains(&batch_language_code(language)) {
                 LanguageSupport::Supported {
                     quality: LanguageQuality::NoData,
                 }
@@ -68,6 +68,13 @@ const BATCH_LANGUAGE_CODES: &[&str] = &[
     "vi", "yi", "yo", "zh",
 ];
 
+fn batch_language_code(language: &anlg_language::Language) -> &str {
+    match language.iso639() {
+        anlg_language::ISO639::Jv => "jw",
+        _ => language.iso639().code(),
+    }
+}
+
 pub(super) fn documented_language_codes_live() -> impl Iterator<Item = &'static str> {
     ["en"].into_iter()
 }
@@ -93,5 +100,13 @@ mod tests {
 
         assert!(codes.contains(&"ko"));
         assert!(codes.contains(&"zh"));
+    }
+
+    #[test]
+    fn batch_supports_the_javanese_provider_code() {
+        let javanese = anlg_language::Language::new(anlg_language::ISO639::Jv);
+
+        assert_eq!(batch_language_code(&javanese), "jw");
+        assert!(CartesiaAdapter::is_supported_languages_batch(&[javanese]));
     }
 }

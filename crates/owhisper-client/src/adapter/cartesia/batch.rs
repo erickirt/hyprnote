@@ -10,7 +10,7 @@ use crate::adapter::http::{ensure_success, streaming_file_part};
 use crate::adapter::{BatchFuture, BatchSttAdapter, ClientWithMiddleware, MIXED_CAPTURE_CHANNEL};
 use crate::error::Error;
 
-use super::{API_VERSION, CartesiaAdapter, DEFAULT_MODEL};
+use super::{API_VERSION, CartesiaAdapter, DEFAULT_MODEL, batch_language_code};
 
 impl BatchSttAdapter for CartesiaAdapter {
     fn provider_name(&self) -> &'static str {
@@ -82,7 +82,7 @@ async fn transcribe_file(
         .text("timestamp_granularities[]", "word");
 
     if let Some(language) = params.languages.first() {
-        form = form.text("language", language.iso639().code().to_string());
+        form = form.text("language", batch_language_code(language).to_string());
     }
 
     let mut request = client.post(transcription_url(api_base)?.to_string());

@@ -1,4 +1,5 @@
 use crate::adapter::{LanguageQuality, LanguageSupport};
+use anlg_language::ISO639;
 
 // https://docs.gladia.io/chapters/language/supported-languages
 pub(super) const SUPPORTED_LANGUAGES: &[&str] = &[
@@ -13,8 +14,15 @@ pub(super) const SUPPORTED_LANGUAGES: &[&str] = &[
 
 pub(super) const SOLARIA_3_LANGUAGES: &[&str] = &["de", "en", "es", "fr", "it"];
 
+pub(super) fn provider_code(language: &anlg_language::Language) -> &str {
+    match language.iso639() {
+        ISO639::Jv => "jw",
+        _ => language.iso639().code(),
+    }
+}
+
 pub(super) fn single_language_support(language: &anlg_language::Language) -> LanguageSupport {
-    let code = language.iso639().code();
+    let code = provider_code(language);
     if SUPPORTED_LANGUAGES.contains(&code) {
         LanguageSupport::Supported {
             quality: LanguageQuality::NoData,

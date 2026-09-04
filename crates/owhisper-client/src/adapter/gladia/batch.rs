@@ -212,7 +212,7 @@ impl GladiaAdapter {
         let languages: Vec<String> = params
             .languages
             .iter()
-            .map(|l| l.iso639().code().to_string())
+            .map(|language| super::language::provider_code(language).to_string())
             .collect();
 
         let language_config = (!languages.is_empty()).then(|| LanguageConfig {

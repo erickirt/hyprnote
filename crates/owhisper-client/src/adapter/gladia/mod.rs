@@ -157,6 +157,21 @@ mod tests {
     }
 
     #[test]
+    fn javanese_uses_the_provider_language_code() {
+        let javanese = anlg_language::Language::new(ISO639::Jv);
+
+        assert_eq!(language::provider_code(&javanese), "jw");
+        assert!(GladiaAdapter::is_supported_languages_live(
+            std::slice::from_ref(&javanese),
+            None,
+        ));
+        assert!(GladiaAdapter::is_supported_languages_batch(
+            &[javanese],
+            None,
+        ));
+    }
+
+    #[test]
     fn test_batch_api_url_empty_uses_default() {
         let url = GladiaAdapter::batch_api_url("");
         assert_eq!(url.as_str(), "https://api.gladia.io/v2");
