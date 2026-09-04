@@ -3,8 +3,12 @@ import { describe, expect, test } from "vitest";
 import { resolveDisplayLocale, SUPPORTED_DISPLAY_LOCALES } from "./locales";
 
 describe("resolveDisplayLocale", () => {
-  test("uses exact supported locales", () => {
-    expect(resolveDisplayLocale("es")).toBe("es");
+  test.each(SUPPORTED_DISPLAY_LOCALES)("uses supported locale %s", (locale) => {
+    expect(resolveDisplayLocale(locale)).toBe(locale);
+  });
+
+  test("resolves the canonical Filipino locale to the Tagalog catalog", () => {
+    expect(resolveDisplayLocale("fil-PH")).toBe("tl");
   });
 
   test("includes broad settings main-language options", () => {

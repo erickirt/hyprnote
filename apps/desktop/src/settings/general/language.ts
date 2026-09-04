@@ -1,6 +1,16 @@
 const MAX_DISPLAY_NAME_LOCALES = 16;
 const displayNamesByLocale = new Map<string, Intl.DisplayNames>();
 
+// Keep settings on the ISO 639-1 values used by the transcription boundary
+// when Intl.Locale prefers another alias.
+const TRANSCRIPTION_LANGUAGE_CODE_OVERRIDES: Record<string, string> = {
+  bh: "bh",
+  bho: "bh",
+  fil: "tl",
+  tl: "tl",
+  tw: "tw",
+};
+
 export const CORE_TRANSCRIPTION_LANGUAGE_CODES = [
   "ar",
   "be",
@@ -66,8 +76,12 @@ export function getBaseLanguageDisplayName(
 
 export function getBaseLanguageCode(code: string): string {
   const language = tryParseLocale(code)?.language ?? "";
+  if (!language) {
+    return "";
+  }
+  const sourceLanguage = code.split(/[-_]/)[0]?.toLowerCase() ?? "";
 
-  return language === "fil" ? "tl" : language;
+  return TRANSCRIPTION_LANGUAGE_CODE_OVERRIDES[sourceLanguage] ?? language;
 }
 
 export function getAdditionalSpokenLanguages(

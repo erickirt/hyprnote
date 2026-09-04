@@ -31,8 +31,18 @@ describe("getAdditionalSpokenLanguages", () => {
     ]);
   });
 
-  test("preserves the ISO 639-1 code for Filipino", () => {
-    expect(getBaseLanguageCode("tl")).toBe("tl");
+  test.each([
+    ["tl", "tl"],
+    ["fil-PH", "tl"],
+    ["bh-IN", "bh"],
+    ["bho-IN", "bh"],
+    ["tw-GH", "tw"],
+    ["ak-GH", "ak"],
+  ])("normalizes transcription language alias %s to %s", (input, expected) => {
+    expect(getBaseLanguageCode(input)).toBe(expected);
+  });
+
+  test("normalizes persisted Filipino aliases", () => {
     expect(getAdditionalSpokenLanguages("en", ["fil"])).toEqual(["tl"]);
   });
 
@@ -42,6 +52,12 @@ describe("getAdditionalSpokenLanguages", () => {
 });
 
 describe("CORE_TRANSCRIPTION_LANGUAGE_CODES", () => {
+  test("preserves every supported ISO 639-1 code", () => {
+    for (const code of CORE_TRANSCRIPTION_LANGUAGE_CODES) {
+      expect(getBaseLanguageCode(code)).toBe(code);
+    }
+  });
+
   test("uses languages supported by both Deepgram and Soniox", () => {
     expect(CORE_TRANSCRIPTION_LANGUAGE_CODES).toContain("en");
     expect(CORE_TRANSCRIPTION_LANGUAGE_CODES).toContain("zh");

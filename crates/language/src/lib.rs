@@ -160,8 +160,9 @@ impl FromStr for Language {
         }
 
         let lang_part = parts[0].to_lowercase();
-        // Intl.Locale canonicalizes ISO 639-1 `tl` to the ISO 639-3 alias `fil`.
+        // Intl.Locale canonicalizes some ISO 639-1 codes to ISO 639-3 aliases.
         let lang_part = match lang_part.as_str() {
+            "bho" => "bh",
             "fil" => "tl",
             _ => &lang_part,
         };
@@ -257,10 +258,12 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_filipino_alias() {
-        let lang: Language = "fil".parse().unwrap();
-        assert_eq!(lang.iso639(), ISO639::Tl);
-        assert_eq!(lang.bcp47_code(), "tl");
+    fn test_parse_iso_639_3_aliases() {
+        for (alias, expected) in [("bho", ISO639::Bh), ("fil", ISO639::Tl)] {
+            let lang: Language = alias.parse().unwrap();
+            assert_eq!(lang.iso639(), expected);
+            assert_eq!(lang.bcp47_code(), expected.code());
+        }
     }
 
     #[test]
