@@ -65,7 +65,9 @@ export function getBaseLanguageDisplayName(
 }
 
 export function getBaseLanguageCode(code: string): string {
-  return tryParseLocale(code)?.language ?? "";
+  const language = tryParseLocale(code)?.language ?? "";
+
+  return language === "fil" ? "tl" : language;
 }
 
 export function getAdditionalSpokenLanguages(

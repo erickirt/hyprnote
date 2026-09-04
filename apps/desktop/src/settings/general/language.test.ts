@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   CORE_TRANSCRIPTION_LANGUAGE_CODES,
   getAdditionalSpokenLanguages,
+  getBaseLanguageCode,
   parseLocale,
 } from "./language";
 
@@ -28,6 +29,11 @@ describe("getAdditionalSpokenLanguages", () => {
     expect(getAdditionalSpokenLanguages("en", ["not a locale", "ko"])).toEqual([
       "ko",
     ]);
+  });
+
+  test("preserves the ISO 639-1 code for Filipino", () => {
+    expect(getBaseLanguageCode("tl")).toBe("tl");
+    expect(getAdditionalSpokenLanguages("en", ["fil"])).toEqual(["tl"]);
   });
 
   test("uses a valid fallback while the main language is loading", () => {

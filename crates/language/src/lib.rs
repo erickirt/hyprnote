@@ -160,8 +160,13 @@ impl FromStr for Language {
         }
 
         let lang_part = parts[0].to_lowercase();
+        // Intl.Locale canonicalizes ISO 639-1 `tl` to the ISO 639-3 alias `fil`.
+        let lang_part = match lang_part.as_str() {
+            "fil" => "tl",
+            _ => &lang_part,
+        };
         let iso639 =
-            ISO639::from_str(&lang_part).map_err(|_| Error::InvalidLanguageCode(s.to_string()))?;
+            ISO639::from_str(lang_part).map_err(|_| Error::InvalidLanguageCode(s.to_string()))?;
 
         let mut script = None;
         let mut region = None;
@@ -249,6 +254,13 @@ mod tests {
         assert_eq!(lang.iso639(), ISO639::En);
         assert_eq!(lang.region(), None);
         assert_eq!(lang.bcp47_code(), "en");
+    }
+
+    #[test]
+    fn test_parse_filipino_alias() {
+        let lang: Language = "fil".parse().unwrap();
+        assert_eq!(lang.iso639(), ISO639::Tl);
+        assert_eq!(lang.bcp47_code(), "tl");
     }
 
     #[test]
