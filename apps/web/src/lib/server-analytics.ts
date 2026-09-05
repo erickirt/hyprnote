@@ -13,50 +13,31 @@ import {
   ANALYTICS_IDENTITY_COOKIE,
   ANALYTICS_IDENTITY_MAX_AGE_SECONDS,
   createPrivateRouteIdentity,
+  getPostHogPersistenceName,
   parseAnalyticsIdentity,
   serializeAnalyticsIdentity,
 } from "./private-route-analytics-identity";
+import { sendServerAnalytics } from "./server-analytics-capture";
 
 export async function captureServerAnalytics({
-  event,
-  userId,
-  properties = {},
-  insertId,
-}: {
-  event: string;
+  userId: _userId,
+  ...event
+}: Pick<
+  Parameters<typeof sendServerAnalytics>[0],
+  "event" | "properties" | "insertId" | "timestamp"
+> & {
   userId: string;
-  properties?: Record<string, unknown>;
-  insertId?: string;
 }) {
   if (!env.VITE_POSTHOG_API_KEY || process.env.NODE_ENV !== "production") {
     return;
   }
 
-  const response = await fetch(
-    `${env.VITE_POSTHOG_HOST.replace(/\/+$/, "")}/capture/`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(1_000),
-      body: JSON.stringify({
-        api_key: env.VITE_POSTHOG_API_KEY,
-        event,
-        properties: {
-          ...properties,
-          distinct_id: userId,
-          $groups: { account: userId },
-          ...(insertId ? { $insert_id: insertId } : {}),
-          surface: "api",
-          analytics_schema_version: 1,
-          app_version: env.VITE_APP_VERSION ?? "unknown",
-        },
-      }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`PostHog capture failed with ${response.status}`);
-  }
+  await sendServerAnalytics({
+    ...event,
+    apiKey: env.VITE_POSTHOG_API_KEY,
+    host: env.VITE_POSTHOG_HOST,
+    appVersion: env.VITE_APP_VERSION ?? "unknown",
+  });
 }
 
 function readPostHogAnonIdFromRequest() {
@@ -70,7 +51,7 @@ function readPostHogAnonIdFromRequest() {
       return null;
     }
 
-    const name = `ph_${env.VITE_POSTHOG_API_KEY}_posthog`;
+    const name = `ph_${getPostHogPersistenceName(env.VITE_POSTHOG_API_KEY)}`;
     const prefix = `${name}=`;
     const raw = cookieHeader
       .split(";")
@@ -148,50 +129,8 @@ export function clearServerAnalyticsIdentity() {
  * along on the request cookie, so the merge can be emitted from here.
  */
 export async function identifyServerUserFromRequest(
-  userId: string,
-  properties: Record<string, unknown> = {},
+  _userId: string,
+  _properties: Record<string, unknown> = {},
 ) {
-  if (!env.VITE_POSTHOG_API_KEY || process.env.NODE_ENV !== "production") {
-    return;
-  }
-
-  // A direct `/auth` visit mints its own anonymous id when posthog-js never ran
-  // before it, so the funnel identity can live in our cookie alone. Nothing
-  // recorded in either place means no analytics happened here (GPC, opt-out),
-  // leaving no merge to make and no identity worth recording.
-  const identityStore = createRequestIdentityStore();
-  const postHogDistinctId = readPostHogAnonIdFromRequest();
-  const identity = identityStore.read();
-  if (!postHogDistinctId && !identity.anonymousId && !identity.userId) {
-    return;
-  }
-
-  const anonDistinctId = createPrivateRouteIdentity(
-    identityStore,
-  ).anonymousIdForIdentify(userId, postHogDistinctId);
-  if (!anonDistinctId) {
-    return;
-  }
-
-  try {
-    await fetch(`${env.VITE_POSTHOG_HOST.replace(/\/+$/, "")}/capture/`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(1_000),
-      body: JSON.stringify({
-        api_key: env.VITE_POSTHOG_API_KEY,
-        event: "$identify",
-        properties: {
-          ...properties,
-          distinct_id: userId,
-          $anon_distinct_id: anonDistinctId,
-          surface: "api",
-          analytics_schema_version: 1,
-          app_version: env.VITE_APP_VERSION ?? "unknown",
-        },
-      }),
-    });
-  } catch {
-    // identity stitching is best-effort and must never block auth
-  }
+  // Server auth flows intentionally do not stitch browser activity to an account.
 }

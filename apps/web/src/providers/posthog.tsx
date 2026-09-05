@@ -9,12 +9,13 @@ import {
 } from "react";
 
 import { env } from "../env";
+import { sanitizePostHogEvent } from "../lib/analytics-sanitization";
 import { isTelemetryPrivateLocation } from "../lib/auth-route-privacy";
 import { hasGlobalPrivacyControl } from "../lib/global-privacy-control";
+import { getPostHogPersistenceName } from "../lib/private-route-analytics-identity";
 import { runWhenIdle } from "../lib/run-when-idle";
 
 const isDev = import.meta.env.DEV;
-
 type PendingAnalyticsOperation = (client: PostHog) => void;
 
 const PostHogContext = createContext<{
@@ -111,15 +112,22 @@ export function PostHogProvider({
       if (!didInitRef.current) {
         client.init(apiKey, {
           api_host: env.VITE_POSTHOG_HOST,
+          persistence_name: getPostHogPersistenceName(apiKey),
           autocapture: true,
           capture_pageview: true,
+          mask_all_element_attributes: true,
+          mask_all_text: true,
+          session_recording: {
+            maskAllInputs: true,
+            maskTextSelector: "*",
+          },
           before_send: (event) =>
             isTelemetryPrivateLocation(
               window.location.pathname,
               window.location.search,
             )
               ? null
-              : event,
+              : sanitizePostHogEvent(event, window.location.origin),
         });
         didInitRef.current = true;
       } else if (routeDisabledRef.current) {

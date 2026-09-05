@@ -1,10 +1,15 @@
-export const ANALYTICS_IDENTITY_COOKIE = "anlg_analytics_identity";
+// Legacy browser IDs may already be linked to accounts, even if locally anonymous.
+export const ANALYTICS_IDENTITY_COOKIE = "anlg_analytics_identity_v2";
 export const ANALYTICS_IDENTITY_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+
+export function getPostHogPersistenceName(apiKey: string) {
+  return `${apiKey}_anonymous_v2`;
+}
 
 export type AnalyticsIdentity = {
   anonymousId?: string;
+  legacyIdentified?: boolean;
   postHogId?: string;
-  userId?: string;
 };
 
 export function parsePostHogDistinctId(raw: string) {
@@ -36,11 +41,17 @@ export function parseAnalyticsIdentity(raw: string | null | undefined) {
     }
 
     const identity: AnalyticsIdentity = {};
-    for (const key of ["anonymousId", "postHogId", "userId"] as const) {
+    for (const key of ["anonymousId", "postHogId"] as const) {
       const value = (parsed as Record<string, unknown>)[key];
       if (typeof value === "string" && value) {
         identity[key] = value;
       }
+    }
+    if (
+      typeof (parsed as Record<string, unknown>).userId === "string" &&
+      (parsed as Record<string, unknown>).userId
+    ) {
+      identity.legacyIdentified = true;
     }
     return identity;
   } catch {
@@ -49,18 +60,14 @@ export function parseAnalyticsIdentity(raw: string | null | undefined) {
 }
 
 export function serializeAnalyticsIdentity(identity: AnalyticsIdentity) {
-  return JSON.stringify(identity);
+  const { anonymousId, postHogId } = identity;
+  return JSON.stringify({
+    ...(anonymousId ? { anonymousId } : {}),
+    ...(postHogId ? { postHogId } : {}),
+  });
 }
 
-/**
- * Tracks which person the persisted posthog-js `distinct_id` already belongs to.
- *
- * posthog-js mints one anonymous id per browser and keeps it until `reset()`,
- * so on a shared browser the same id outlives the first sign-in. Merging it into
- * a second user would fold two people together, and keying pre-login events on it
- * would file them under the previous user. The record lives in a cookie so it
- * survives tab closes and stays visible to the server-side OAuth identify.
- */
+/** Keeps private-route events on an anonymous browser identity. */
 export function createPrivateRouteIdentity(
   store: {
     read: () => AnalyticsIdentity;
@@ -70,14 +77,16 @@ export function createPrivateRouteIdentity(
 ) {
   const sync = (postHogDistinctId: string | null): AnalyticsIdentity => {
     const identity = store.read();
-    if (!postHogDistinctId || postHogDistinctId === identity.postHogId) {
-      return identity;
-    }
-
-    if (postHogDistinctId === identity.userId) {
-      const next = { ...identity, postHogId: postHogDistinctId };
+    if (identity.legacyIdentified) {
+      const next = {
+        anonymousId: createId(),
+        ...(postHogDistinctId ? { postHogId: postHogDistinctId } : {}),
+      };
       store.write(next);
       return next;
+    }
+    if (!postHogDistinctId || postHogDistinctId === identity.postHogId) {
+      return identity;
     }
 
     const next = {
@@ -91,9 +100,6 @@ export function createPrivateRouteIdentity(
   return {
     distinctIdForEvent(postHogDistinctId: string | null) {
       const identity = sync(postHogDistinctId);
-      if (identity.userId) {
-        return identity.userId;
-      }
       if (identity.anonymousId) {
         return identity.anonymousId;
       }
@@ -103,34 +109,10 @@ export function createPrivateRouteIdentity(
       return anonymousId;
     },
 
-    anonymousIdForIdentify(userId: string, postHogDistinctId: string | null) {
-      const identity = sync(postHogDistinctId);
-      if (identity.userId === userId) {
-        return null;
-      }
-
-      const anonymousId = identity.userId
-        ? createId()
-        : (identity.anonymousId ?? postHogDistinctId);
-
-      store.write({
-        ...identity,
-        ...(anonymousId ? { anonymousId } : {}),
-        userId,
-      });
-      return anonymousId && anonymousId !== userId ? anonymousId : null;
-    },
-
-    /**
-     * Releases the signed-in user while keeping the posthog-js id recorded as
-     * claimed, so the next sign-in on this browser mints a fresh anonymous id
-     * instead of merging the previous user's id into a second person.
-     *
-     * Returns false when nothing was ever claimed and the record can be dropped.
-     */
+    /** Rotates the anonymous identity when an authenticated session ends. */
     signOut(postHogDistinctId: string | null) {
       const identity = store.read();
-      if (!identity.userId) {
+      if (!identity.postHogId && !identity.legacyIdentified) {
         return false;
       }
 
