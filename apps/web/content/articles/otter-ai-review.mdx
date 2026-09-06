@@ -5,12 +5,12 @@ author: "John Jeong"
 featured: false
 category: "Comparisons"
 ready_for_review: true
-date: "2026-02-11"
+date: "2026-09-06"
 ---
 
 After using Otter AI across 200+ meetings, including sensitive client calls and chaotic team standups, I've learned what the marketing materials won't tell you.
 
-Otter AI offers a free tier with significant limitations. Safety is complicated—there's a 2025 lawsuit and privacy concerns worth understanding. This review covers pricing (including hidden costs), features that actually work, transcription accuracy, privacy issues, and alternatives I've tested.
+Otter AI offers a free tier with significant limitations. Safety is complicated too: the federal privacy lawsuit against Otter got its first real court ruling in August 2026, and most of the case survived. This review covers pricing (including hidden costs), features that actually work, transcription accuracy, the lawsuit ruling, and alternatives I've tested. Otter also shipped an SDR Agent, a Recruiting Agent, and an MCP server this year, but the grades below are about the core meeting-notes experience most people actually buy it for.
 
 ## How does Otter AI work?
 
@@ -37,9 +37,9 @@ Otter AI requires constant internet connectivity. During a venue walkthrough wit
 
 ## What languages does Otter support?
 
-Otter AI transcribes only 3 languages: English, Spanish, and French.
+Otter AI transcribes 6 languages: English, Spanish, French, German, Japanese, and Chinese (Simplified). That's an expansion from the 3 languages (English, Spanish, French) it supported for most of 2025 and early 2026.
 
-For international teams, this becomes a dealbreaker. A weekly check-in with German partners means no Otter AI. A client call with Japanese stakeholders gets no transcription.
+For international teams, it's still thin. A weekly check-in with German or Japanese partners now works, but a client call in Korean, Portuguese, or Italian gets no transcription. Competitors go much further: Fireflies covers 69+ languages and Notta covers 58, so multilingual teams outside Otter's six will still need a second tool.
 
 ## Otter meeting assistant features & how I would grade them
 
@@ -110,7 +110,7 @@ Recording in-person meetings from phone works, and transcripts sync across devic
 
 ### 10. Search & playback (Grade: B+)
 
-Keyword search across hundreds of meetings is fast. Clicking any word in the transcript jumps audio to that moment. Variable playback speed (1.5x-2x) saved tons of review time. Advanced search operators are limited. You can't search "phrase in quotes AND keyword," and there's no way to filter by meeting duration, participant count, or date range easily.
+Keyword search across hundreds of meetings is fast. Clicking any word in the transcript jumps audio to that moment. Variable playback speed (1.5x-2x) saved tons of review time. Advanced search operators are limited. You can't search "phrase in quotes AND keyword", and there's no way to filter by meeting duration, participant count, or date range easily.
 
 ### 11. File upload & transcription (Grade: C+)
 
@@ -140,7 +140,18 @@ Analytics are superficial though (just usage, not meeting quality metrics), and 
 
 ## Is Otter AI safe?
 
-Otter AI's security became a major concern following a federal class-action lawsuit filed in August 2025 and multiple user incidents. The case, filed in the U.S. District Court for the Northern District of California, alleges that Otter "deceptively and surreptitiously" records private conversations without proper consent.
+Otter AI's security became a major concern following a federal class-action lawsuit filed in August 2025 and multiple user incidents. Four suits (Brewer, Walker, Theus, and Winston) were consolidated into *In re Otter.AI Privacy Litigation* (No. 25-cv-06911-EKL) in the U.S. District Court for the Northern District of California, alleging that Otter's Notetaker joins meetings and records and transcribes them, then keeps and reuses that material to train its own AI models without every participant's consent.
+
+### The August 2026 ruling
+
+On August 13, 2026, Judge Eumi K. Lee ruled on Otter's motion to dismiss, and it was a mixed but mostly bad outcome for Otter. The court granted the motion in part and denied it in part:
+
+- **Survived in full:** claims under California's Invasion of Privacy Act (CIPA), the federal Wiretap Act (ECPA), Illinois' Biometric Information Privacy Act (BIPA), unjust enrichment, and California's Unfair Competition Law.
+- **Dismissed:** the CFAA and CDAFA computer-crime claims, the Washington Privacy Act claim, and the common-law privacy claims of every plaintiff except one (a plaintiff who described a call with a medical provider in enough factual detail to plausibly allege a confidential communication).
+
+The most consequential holding: the court found Otter is a **third-party eavesdropper** under CIPA Section 631, not merely an extension of the meeting host's own recording tool. The reasoning is specific to what Otter does with the data, it doesn't just transcribe and hand the text back, it retains recordings and voiceprints and uses them to train its own machine-learning models for its own commercial benefit. That's what separated Otter from software that acts purely as a party's recording extension in earlier case law.
+
+The case is not decided. No court has found Otter's practices illegal, and Otter disputes the claims. But the ruling means the core theory (that an AI notetaker profiting from your meeting recordings can be treated as a separate eavesdropper, not just your tool) survives into discovery.
 
 ### Legal and privacy concerns
 
@@ -158,7 +169,7 @@ Real-world incidents have highlighted these privacy issues:
 
 Otter's privacy policy reveals extensive data collection practices beyond simple transcription. The company admits to using customer data for AI training:
 
-*"We train our proprietary artificial intelligence technology on de-identified audio recordings. We also train our technology on transcriptions to provide more accurate services, which may contain Personal Information." - Otter AI*
+*"We train our proprietary artificial intelligence technology on de-identified audio recordings. We also train our technology on transcriptions to provide more accurate services, which may contain Personal Information". - Otter AI*
 
 The service shares personal information with multiple third-party processors, including cloud service providers, data labeling services, and AI backend providers. This creates potential exposure points that many users may not realize they're accepting.
 
@@ -176,7 +187,8 @@ For a detailed analysis of these security concerns and documented incidents, see
 
 Otter AI offers several pricing tiers:
 
-![Source](/images/blog/articles/otter-ai-review/otter-10.webp)
+![Otter.ai's Basic, Pro, Business, and Enterprise pricing tiers on the monthly billing view](/images/blog/articles/otter-ai-review/otter-pricing-2026-09.png)
+Source: [Otter.ai pricing page](https://otter.ai/pricing), captured September 2026
 
 ### Otter AI free plan features:
 
@@ -207,7 +219,7 @@ Otter AI's free tier works only if you average 1-2 meetings per week. For daily 
 
 ### Otter AI Business plan
 
-**Price:** $40/month billed monthly, $19.99/month if annual commitment
+**Price:** $30/month billed monthly, $19.99/month if annual commitment
 
 **What changes:**
 
@@ -220,21 +232,21 @@ Otter AI's free tier works only if you average 1-2 meetings per week. For daily 
 
 For a 10-person team:
 
-- Monthly cost: $400/month ($4,800/year)
-- Annual commitment: $200/month ($2,400/year)
+- Monthly cost: $300/month ($3,600/year)
+- Annual commitment: $199.90/month (about $2,399/year)
 
 ### Otter AI Enterprise plan (Custom)
 
-**Price:** Contact sales for quote (for roughly 50 seats, expect around $25k annually)
+**Price:** Contact sales, no published rate. Cost scales with seats and which add-ons (HIPAA compliance, SSO/SCIM, custom integrations) your team needs.
 
 **What's included:**
 
-- Unlimited transcription
-- HIPAA compliance options
-- Advanced security
-- SSO
-- Dedicated support
-- Custom legal terms
+- Unlimited transcription and file imports
+- SSO, SCIM, and domain capture
+- HIPAA compliance (add-on)
+- Otter Sales Notetaker and custom CRM/dialer integrations
+- Otter API and webhooks
+- Dedicated support and custom legal terms
 
 ### How costs add up
 
@@ -327,7 +339,7 @@ The free plan includes 300 monthly minutes, 30-minute conversation limit, 3 life
 
 ### 4. Can Otter.ai transcribe in languages other than English?
 
-Otter.ai supports only 3 languages: English, Spanish, and French. This is a major limitation compared to competitors.
+Otter.ai supports 6 languages: English, Spanish, French, German, Japanese, and Chinese (Simplified). That's up from 3 languages in earlier 2026, but it's still a limitation compared to Fireflies (69+ languages) or Notta (58).
 
 ### 5. What are the best alternatives to Otter.ai?
 
@@ -335,4 +347,4 @@ Anarlog (best for zero lock-in with complete control over data and AI), Fireflie
 
 ### 6. Is Otter.ai worth it for teams?
 
-Otter.ai works for basic English-language meeting documentation if you're comfortable with cloud processing. For a 10-person team, costs run $200-400/month. However, it offers only 3 languages, has significant privacy concerns, requires constant internet, and transcription accuracy needs editing.
+Otter.ai works for basic meeting documentation in its six supported languages if you're comfortable with cloud processing. For a 10-person team on the Business plan, costs run about $200-300/month depending on billing terms. However, a federal court ruled in August 2026 that Otter can be treated as a third-party eavesdropper under California's privacy law for retaining and reusing recordings to train its models, so the privacy concerns are no longer just allegations sitting in a complaint. It also requires constant internet, and transcription accuracy needs editing.
