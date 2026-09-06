@@ -1,15 +1,16 @@
+import { useMemo } from "react";
+
 import { useLiveQuery } from "@/db";
 import { captureOperationalError } from "@/lib/error-reporting";
 
-type TranscriptRow = {
-  id: string;
-  words_json: string;
-};
-
-export type TranscriptSegment = {
-  id: string;
-  text: string;
-};
+import {
+  transcriptSegments,
+  SESSION_TRANSCRIPTS_SQL,
+  SESSION_SPEAKERS_SQL,
+  type TranscriptRow,
+  type TranscriptSegment,
+} from "./transcript-model";
+export type { TranscriptSegment } from "./transcript-model";
 
 const MAX_REPORTED_INVALID_ROWS = 1_000;
 const reportedInvalidRows = new Set<string>();
@@ -25,17 +26,27 @@ function rememberInvalidRow(rowId: string) {
   }
 }
 
-function mapTranscriptRows(rows: TranscriptRow[]): TranscriptSegment[] {
-  return rows
-    .map((row) => {
-      let text = "";
+export function useSessionTranscripts(sessionId: string): TranscriptSegment[] {
+  const { data: rows } = useLiveQuery<TranscriptRow, TranscriptRow[]>({
+    sql: SESSION_TRANSCRIPTS_SQL,
+    params: [sessionId],
+    mapRows: (rows) => rows,
+  });
+  const { data: humans } = useLiveQuery<
+    { id: string; name: string },
+    { id: string; name: string }[]
+  >({
+    sql: SESSION_SPEAKERS_SQL,
+    params: [sessionId],
+    mapRows: (rows) => rows,
+  });
+  return useMemo(() => {
+    const names = new Map(
+      (humans ?? []).map((human) => [human.id, human.name]),
+    );
+    return (rows ?? []).flatMap((row) => {
       try {
-        const words = JSON.parse(row.words_json) as { text?: string }[];
-        text = words
-          .map((word) => word.text ?? "")
-          .join(" ")
-          .replace(/\s+/g, " ")
-          .trim();
+        return transcriptSegments(row, names);
       } catch (error) {
         if (!reportedInvalidRows.has(row.id)) {
           rememberInvalidRow(row.id);
@@ -44,17 +55,8 @@ function mapTranscriptRows(rows: TranscriptRow[]): TranscriptSegment[] {
             level: "warning",
           });
         }
+        return [];
       }
-      return { id: row.id, text };
-    })
-    .filter((segment) => segment.text !== "");
-}
-
-export function useSessionTranscripts(sessionId: string): TranscriptSegment[] {
-  const { data } = useLiveQuery<TranscriptRow, TranscriptSegment[]>({
-    sql: "SELECT id, words_json FROM transcripts WHERE session_id = ? AND deleted_at IS NULL ORDER BY started_at_ms, id",
-    params: [sessionId],
-    mapRows: mapTranscriptRows,
-  });
-  return data ?? [];
+    });
+  }, [rows, humans]);
 }

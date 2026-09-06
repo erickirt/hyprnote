@@ -1,34 +1,46 @@
+import { useMutationState } from "@tanstack/react-query";
 import { fetch } from "expo/fetch";
 
 import { execute, executeTransaction } from "@/db";
 import { env } from "@/lib/env";
+import { captureOperationalError } from "@/lib/error-reporting";
 import { id, nowIso } from "@/lib/ids";
+import { queryClient } from "@/lib/query-client";
 import { readPreferences } from "@/settings/preferences";
 import { resolveProvider } from "@/settings/providers";
 
 import { docToPlainText, stripMarkdownTitle } from "./note-doc";
 import { summaryRequest } from "./provider-summary";
 import { buildSummaryPrompt, readSummaryText } from "./summary-model";
+import {
+  SESSION_TRANSCRIPTS_SQL,
+  SESSION_SPEAKERS_SQL,
+  transcriptSegments,
+  type TranscriptRow,
+} from "./transcript-model";
 import { readBoundedTranscriptionResponse } from "./transcription-response";
 
-export async function summarizeSession(sessionId: string): Promise<void> {
-  const [notes, transcripts, existing, preferences, provider] =
-    await Promise.all([
+async function runSummary(
+  sessionId: string,
+  automatic: boolean,
+): Promise<void> {
+  const existing = await execute<{ id: string; updated_at: string }>(
+    "SELECT id, updated_at FROM session_documents WHERE session_id = ? AND kind = 'summary' AND deleted_at IS NULL ORDER BY sort_order, created_at, id LIMIT 1",
+    [sessionId],
+  );
+  if (automatic && existing.length > 0) return;
+  const [notes, transcripts, humans, preferences, provider] = await Promise.all(
+    [
       execute<{ body: string; body_format: string }>(
         "SELECT body, body_format FROM session_documents WHERE session_id = ? AND kind = 'note' AND deleted_at IS NULL ORDER BY CASE WHEN id = session_id THEN 0 ELSE 1 END, sort_order, id LIMIT 1",
         [sessionId],
       ),
-      execute<{ words_json: string }>(
-        "SELECT words_json FROM transcripts WHERE session_id = ? AND deleted_at IS NULL ORDER BY started_at_ms, id",
-        [sessionId],
-      ),
-      execute<{ id: string; updated_at: string }>(
-        "SELECT id, updated_at FROM session_documents WHERE session_id = ? AND kind = 'summary' AND deleted_at IS NULL ORDER BY sort_order, created_at, id LIMIT 1",
-        [sessionId],
-      ),
+      execute<TranscriptRow>(SESSION_TRANSCRIPTS_SQL, [sessionId]),
+      execute<{ id: string; name: string }>(SESSION_SPEAKERS_SQL, [sessionId]),
       readPreferences(),
       resolveProvider("llm"),
-    ]);
+    ],
+  );
   const note = notes[0];
   const text = note
     ? (note.body_format === "markdown"
@@ -36,15 +48,10 @@ export async function summarizeSession(sessionId: string): Promise<void> {
         : docToPlainText(note.body)
       ).text
     : "";
+  const names = new Map(humans.map((human) => [human.id, human.name]));
   const transcript = transcripts
-    .map((row) => {
-      const words: unknown = JSON.parse(row.words_json);
-      if (!Array.isArray(words))
-        throw new Error("This transcript could not be read.");
-      return words
-        .map((word) => (typeof word?.text === "string" ? word.text : ""))
-        .join(" ");
-    })
+    .flatMap((row) => transcriptSegments(row, names))
+    .map((segment) => `${segment.speaker}: ${segment.text}`)
     .join("\n");
   const source = `Notes:\n${text}\n\nTranscript:\n${transcript}`;
   if (!text.trim() && !transcript.trim())
@@ -118,4 +125,51 @@ export async function summarizeSession(sessionId: string): Promise<void> {
     throw new Error(
       "This note changed while generating its summary. Please try again.",
     );
+}
+
+const inflight = new Map<string, Promise<void>>();
+
+export function summarizeSession(
+  sessionId: string,
+  {
+    automatic = false,
+    beforeGenerate,
+  }: {
+    automatic?: boolean;
+    beforeGenerate?: () => void | Promise<void>;
+  } = {},
+): Promise<void> {
+  const pending = inflight.get(sessionId);
+  if (pending) return pending;
+  const mutation = queryClient.getMutationCache().build(queryClient, {
+    mutationKey: ["session-summary", sessionId],
+    mutationFn: async () => {
+      await beforeGenerate?.();
+      await runSummary(sessionId, automatic);
+    },
+    retry: false,
+    onError: (error) =>
+      captureOperationalError(error, { operation: "session_summary" }),
+  });
+  const promise = mutation
+    .execute(undefined)
+    .finally(() => inflight.delete(sessionId));
+  inflight.set(sessionId, promise);
+  return promise;
+}
+
+export function generateSummaryAfterTranscription(sessionId: string): void {
+  // Summary failures are visible in the note; they must never fail audio persistence.
+  void summarizeSession(sessionId, { automatic: true }).catch(() => {});
+}
+
+export function useSessionSummaryState(sessionId: string) {
+  const states = useMutationState({
+    filters: { mutationKey: ["session-summary", sessionId], exact: true },
+    select: (mutation) => ({
+      status: mutation.state.status,
+      error: mutation.state.error,
+    }),
+  });
+  return states.at(-1);
 }
