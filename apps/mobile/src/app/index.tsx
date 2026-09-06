@@ -1,8 +1,23 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useRef, useState } from "react";
-import { Platform, ScrollView, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Platform, Text, View } from "react-native";
+import Animated, {
+  Easing,
+  ReduceMotion,
+  useAnimatedReaction,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
+import { scheduleOnRN } from "react-native-worklets";
 
 import { useAuth } from "@/auth/context";
 import { ActionButtonCard } from "@/components/action-button-card";
@@ -11,12 +26,17 @@ import { SessionCard } from "@/components/session-card";
 import { StartListeningButton } from "@/components/start-listening-button";
 import { IconButton } from "@/components/ui/icon-button";
 import { UserAvatarButton } from "@/components/user-avatar";
-import { Spacing, Typography } from "@/constants/theme";
+import {
+  LISTENING_CONTROL_HEIGHT,
+  Spacing,
+  Typography,
+} from "@/constants/theme";
 import { createSession, deleteSession } from "@/data/session";
 import { useSidebarItemPreferences } from "@/data/sidebar-preferences";
 import { useTimelineSessions, type TimelineSession } from "@/data/timeline";
 import { confirmDestructive } from "@/lib/confirm";
 import { captureOperationalError } from "@/lib/error-reporting";
+import { scrollVisibility } from "@/lib/scroll-visibility";
 import { useMountEffect } from "@/lib/use-mount-effect";
 import { createStyleHook } from "@/settings/theme-provider";
 
@@ -28,8 +48,64 @@ export default function HomeScreen() {
   const auth = useAuth();
   const { items, isLoading } = useTimelineSessions();
   const sidebarPreferences = useSidebarItemPreferences();
+  const insets = useSafeAreaInsets();
+  const reducedMotion = useReducedMotion();
   const [searching, setSearching] = useState(false);
   const [showActionButtonCard, setShowActionButtonCard] = useState(false);
+  const [buttonHeight, setButtonHeight] = useState(
+    LISTENING_CONTROL_HEIGHT + Spacing.xs,
+  );
+  const [buttonHidden, setButtonHidden] = useState(false);
+  const scrollState = useSharedValue({ anchor: 0, hidden: false });
+  const contentHeight = useSharedValue(0);
+  const viewportHeight = useSharedValue(0);
+  const buttonProgress = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler((event) => {
+    const previous = scrollState.get();
+    const next = scrollVisibility(
+      previous,
+      event.contentOffset.y,
+      event.contentSize.height - event.layoutMeasurement.height,
+    );
+    scrollState.set(next);
+  });
+  useAnimatedReaction(
+    () => contentHeight.get() - viewportHeight.get(),
+    (maxOffset) => {
+      if (maxOffset <= 0) scrollState.set({ anchor: 0, hidden: false });
+    },
+  );
+  useAnimatedReaction(
+    () => scrollState.get().hidden,
+    (hidden, previous) => {
+      if (hidden === previous) return;
+      scheduleOnRN(setButtonHidden, hidden);
+      const target = hidden ? 1 : 0;
+      buttonProgress.set(
+        reducedMotion
+          ? withTiming(target, {
+              duration: 150,
+              easing: Easing.bezier(0.23, 1, 0.32, 1),
+              reduceMotion: ReduceMotion.Never,
+            })
+          : withSpring(target, {
+              duration: 400,
+              dampingRatio: 1,
+              overshootClamping: true,
+            }),
+      );
+    },
+  );
+  const buttonStyle = useAnimatedStyle(() => ({
+    opacity: 1 - buttonProgress.get(),
+    transform: [
+      {
+        translateY: reducedMotion
+          ? 0
+          : buttonProgress.get() * (buttonHeight + insets.bottom),
+      },
+    ],
+  }));
   // Ref, not state: two taps in the same frame both pass a state check.
   const busyRef = useRef(false);
 
@@ -126,50 +202,71 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <ScrollView
-        style={styles.list}
-        contentContainerStyle={styles.listContent}
-        keyboardShouldPersistTaps="handled"
-      >
-        {showActionButtonCard && (
-          <ActionButtonCard
-            onConfigure={() => router.push("/action-button")}
-            onDismiss={dismissActionButtonCard}
-          />
-        )}
-        {!isLoading && items.length === 0 && (
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>No meetings yet</Text>
-            <Text style={styles.emptyBody}>
-              Start listening or create a new note.
-            </Text>
-          </View>
-        )}
-        {items.map((item) => {
-          if (item.type === "header") {
-            return (
-              <Text key={item.key} style={styles.sectionLabel}>
-                {item.label}
-              </Text>
-            );
+      <View style={styles.timeline}>
+        <Animated.ScrollView
+          style={styles.list}
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingBottom: buttonHeight + Spacing.lg },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={(_width, height) => contentHeight.set(height)}
+          onLayout={(event) =>
+            viewportHeight.set(event.nativeEvent.layout.height)
           }
-          return (
-            <SessionCard
-              key={item.key}
-              session={item.session}
-              showFolder={sidebarPreferences.showFolder}
-              showTags={sidebarPreferences.showTags}
-              onPress={() => router.push(`/note/${item.session.id}`)}
-              onDelete={() => void handleDelete(item.session)}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+        >
+          {showActionButtonCard && (
+            <ActionButtonCard
+              onConfigure={() => router.push("/action-button")}
+              onDismiss={dismissActionButtonCard}
             />
-          );
-        })}
-      </ScrollView>
+          )}
+          {!isLoading && items.length === 0 && (
+            <View style={styles.empty}>
+              <Text style={styles.emptyTitle}>No meetings yet</Text>
+              <Text style={styles.emptyBody}>
+                Start listening or create a new note.
+              </Text>
+            </View>
+          )}
+          {items.map((item) => {
+            if (item.type === "header") {
+              return (
+                <Text key={item.key} style={styles.sectionLabel}>
+                  {item.label}
+                </Text>
+              );
+            }
+            return (
+              <SessionCard
+                key={item.key}
+                session={item.session}
+                showFolder={sidebarPreferences.showFolder}
+                showTags={sidebarPreferences.showTags}
+                onPress={() => router.push(`/note/${item.session.id}`)}
+                onDelete={() => void handleDelete(item.session)}
+              />
+            );
+          })}
+        </Animated.ScrollView>
 
-      <StartListeningButton
-        bottomSpacing={Spacing.xs}
-        onPress={() => void createAndOpen("?listen=1")}
-      />
+        <Animated.View
+          style={[styles.listeningButton, buttonStyle]}
+          onLayout={(event) => setButtonHeight(event.nativeEvent.layout.height)}
+          pointerEvents={buttonHidden ? "none" : "box-none"}
+          accessibilityElementsHidden={buttonHidden}
+          importantForAccessibility={
+            buttonHidden ? "no-hide-descendants" : "auto"
+          }
+        >
+          <StartListeningButton
+            bottomSpacing={Spacing.xs}
+            onPress={() => void createAndOpen("?listen=1")}
+          />
+        </Animated.View>
+      </View>
       {searching && (
         <SearchPalette
           onClose={() => setSearching(false)}
@@ -209,10 +306,18 @@ const useStyles = createStyleHook((Colors) => ({
   list: {
     flex: 1,
   },
+  timeline: {
+    flex: 1,
+  },
+  listeningButton: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   listContent: {
     flexGrow: 1,
     paddingHorizontal: Spacing.md,
-    paddingBottom: Spacing.lg,
   },
   empty: {
     flex: 1,
