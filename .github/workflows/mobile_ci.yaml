@@ -13,17 +13,23 @@ on:
       - apps/mobile/**
       - apps/watch/apple/**
       - crates/db-app/**
+      - crates/db-core/**
+      - crates/cloudsync/**
       - crates/db-execute/**
       - crates/mobile-bridge/**
       - crates/xtask/**
+      - crates/ws-client/**
       - packages/mobile-bridge-rn/**
       - packages/db-react/**
       - packages/db-runtime/**
       - packages/provider-validation/**
+      - patches/expo-audio*.patch
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - rust-toolchain.toml
+      - Cargo.toml
+      - Cargo.lock
   pull_request:
     paths:
       - .github/actions/pnpm_install/**
@@ -31,17 +37,23 @@ on:
       - apps/mobile/**
       - apps/watch/apple/**
       - crates/db-app/**
+      - crates/db-core/**
+      - crates/cloudsync/**
       - crates/db-execute/**
       - crates/mobile-bridge/**
       - crates/xtask/**
+      - crates/ws-client/**
       - packages/mobile-bridge-rn/**
       - packages/db-react/**
       - packages/db-runtime/**
       - packages/provider-validation/**
+      - patches/expo-audio*.patch
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - rust-toolchain.toml
+      - Cargo.toml
+      - Cargo.lock
 
 permissions:
   contents: read
@@ -87,13 +99,25 @@ jobs:
   ios_build:
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/pnpm_install
       - uses: ./.github/actions/rust_install
         with:
           platform: ios
+      - if: github.event_name == 'workflow_dispatch'
+        run: crates/cloudsync/scripts/rebuild-ios.sh
+      - run: crates/cloudsync/scripts/test-ios.sh
+      - if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cloudsync-ios-${{ github.sha }}
+          path: crates/cloudsync/vendor/cloudsync/apple/CloudSync.xcframework
+          if-no-files-found: error
+          retention-days: 7
       - run: cargo xtask mobile-bridge ios
       - run: |
           pnpm -F @anlg/mobile exec expo run:ios \
@@ -101,13 +125,22 @@ jobs:
             --device generic \
             --output "$RUNNER_TEMP/anarlog-mobile-ios" \
             --no-bundler
+      - name: Verify CloudSync is embedded in the iOS app
+        shell: bash
+        run: |
+          app=$(find "$RUNNER_TEMP/anarlog-mobile-ios" -maxdepth 1 -name '*.app' -type d -print -quit)
+          test -n "$app"
+          test -f "$app/Frameworks/CloudSync.framework/CloudSync"
+          strings "$app/Frameworks/CloudSync.framework/CloudSync" | grep -F CLOUDSYNC_CURL_TIMEOUT_MS >/dev/null
 
   android_build:
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/powershell 2> /dev/null || true
           df -h /
@@ -120,6 +153,22 @@ jobs:
           distribution: temurin
           java-version: "17"
       - run: cargo install cargo-ndk --version 4.1.2 --locked
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          log-accepted-android-sdk-licenses: false
+      - name: Select the Android NDK
+        run: |
+          sdkmanager "ndk;27.1.12297006"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
+      - if: github.event_name == 'workflow_dispatch'
+        run: crates/cloudsync/scripts/rebuild-android.sh
+      - if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cloudsync-android-${{ github.sha }}
+          path: crates/cloudsync/vendor/cloudsync/android
+          if-no-files-found: error
+          retention-days: 7
       - run: cargo xtask mobile-bridge android
       - run: pnpm -F @anlg/mobile exec expo prebuild --platform android --no-install
       - run: |
@@ -127,6 +176,19 @@ jobs:
             --no-daemon \
             -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g"
         working-directory: apps/mobile/android
+      - name: Verify CloudSync is packaged in the Android app
+        shell: python
+        run: |
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          apks = list(Path("apps/mobile/android/app/build/outputs/apk/release").glob("*.apk"))
+          assert apks, "No release APK was produced"
+          for apk in apks:
+              with ZipFile(apk) as package:
+                  for abi in ("arm64-v8a", "armeabi-v7a", "x86_64"):
+                      library = package.read(f"lib/{abi}/libcloudsync.so")
+                      assert b"CLOUDSYNC_CURL_TIMEOUT_MS" in library, f"{apk}: unpatched CloudSync for {abi}"
 
   mobile_ci:
     if: always()

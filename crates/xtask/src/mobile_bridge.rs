@@ -13,7 +13,20 @@ pub(crate) fn mobile_bridge_ios() -> Result<()> {
         "{ubrn} build ios --config ubrn.config.yaml --and-generate"
     )
     .run()?;
-    repair_generated_android_cmake()?;
+    bundle_ios_cloudsync()?;
+    repair_generated_native_projects()?;
+    Ok(())
+}
+
+fn bundle_ios_cloudsync() -> Result<()> {
+    let sh = setup_shell()?;
+    let root = crate::repo_root();
+    let source = root.join("crates/cloudsync/vendor/cloudsync/apple/CloudSync.xcframework");
+    let destination = root.join("packages/mobile-bridge-rn/build/CloudSync.xcframework");
+    if destination.exists() {
+        fs::remove_dir_all(&destination)?;
+    }
+    cmd!(sh, "cp -R {source} {destination}").run()?;
     Ok(())
 }
 
@@ -25,7 +38,24 @@ pub(crate) fn mobile_bridge_android() -> Result<()> {
         "{ubrn} build android --config ubrn.config.yaml --and-generate"
     )
     .run()?;
-    repair_generated_android_cmake()?;
+    let root = crate::repo_root();
+    bundle_android_cloudsync(
+        &root.join("crates/cloudsync/vendor/cloudsync/android"),
+        &root.join("packages/mobile-bridge-rn/android/src/main/jniLibs"),
+    )?;
+    repair_generated_native_projects()?;
+    Ok(())
+}
+
+fn bundle_android_cloudsync(source: &Path, destination: &Path) -> Result<()> {
+    for abi in ["arm64-v8a", "armeabi-v7a", "x86_64"] {
+        let output = destination.join(abi);
+        fs::create_dir_all(&output)?;
+        fs::copy(
+            source.join(abi).join("cloudsync.so"),
+            output.join("libcloudsync.so"),
+        )?;
+    }
     Ok(())
 }
 
@@ -52,11 +82,11 @@ pub(crate) fn mobile_bridge_rn() -> Result<()> {
         "{ubrn} generate jsi turbo-module --config ubrn.config.yaml mobile_bridge"
     )
     .run()?;
-    repair_generated_android_cmake()?;
+    repair_generated_native_projects()?;
     Ok(())
 }
 
-fn repair_generated_android_cmake() -> Result<()> {
+fn repair_generated_native_projects() -> Result<()> {
     let cmake_path = crate::repo_root().join("packages/mobile-bridge-rn/android/CMakeLists.txt");
     let contents = fs::read_to_string(&cmake_path)?;
     let generated = r#"execute_process(
@@ -75,6 +105,19 @@ get_filename_component(UNIFFI_BINDGEN_PATH "${UNIFFI_BINDGEN_PATH}" DIRECTORY)"#
 
     if contents.contains(generated) {
         fs::write(cmake_path, contents.replace(generated, compatible))?;
+    }
+
+    let podspec_path = crate::repo_root().join("packages/mobile-bridge-rn/MobileBridge.podspec");
+    let contents = fs::read_to_string(&podspec_path)?;
+    let generated = r#"s.vendored_frameworks = "build/MobileBridge.xcframework""#;
+    let bundled = r#"s.vendored_frameworks = "build/MobileBridge.xcframework", "build/CloudSync.xcframework""#;
+    if !contents.contains(bundled) {
+        if !contents.contains(generated) {
+            bail!(
+                "generated MobileBridge podspec has no recognized vendored framework declaration"
+            );
+        }
+        fs::write(podspec_path, contents.replace(generated, bundled))?;
     }
 
     Ok(())
@@ -114,4 +157,38 @@ fn ubrn_path() -> PathBuf {
     };
 
     root_dir.join("node_modules/.bin").join(bin_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packages_cloudsync_for_each_supported_android_abi() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("vendor");
+        let destination = root.path().join("jniLibs");
+        for abi in ["arm64-v8a", "armeabi-v7a", "x86_64"] {
+            fs::create_dir_all(source.join(abi)).unwrap();
+            fs::write(source.join(abi).join("cloudsync.so"), abi).unwrap();
+        }
+
+        bundle_android_cloudsync(&source, &destination).unwrap();
+
+        for abi in ["arm64-v8a", "armeabi-v7a", "x86_64"] {
+            assert_eq!(
+                fs::read_to_string(destination.join(abi).join("libcloudsync.so")).unwrap(),
+                abi
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_missing_android_cloudsync_binaries() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(
+            bundle_android_cloudsync(&root.path().join("vendor"), &root.path().join("jniLibs"))
+                .is_err()
+        );
+    }
 }
