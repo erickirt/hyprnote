@@ -1,10 +1,16 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { type AnyFieldApi, useForm } from "@tanstack/react-form";
 import { useMutation, useQueries } from "@tanstack/react-query";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { type ComponentType, type ReactNode, useMemo, useState } from "react";
 import { Streamdown } from "streamdown";
 
 import { commands as analyticsCommands } from "@anlg/plugin-analytics";
+import {
+  ProviderCredentialError,
+  providerCredentialIdentity,
+  verifyProviderCredentials,
+} from "@anlg/provider-validation";
 import type { AIProvider } from "@anlg/store";
 import { aiProviderSchema } from "@anlg/store";
 import {
@@ -191,6 +197,19 @@ export function providerRowId(providerType: ProviderType, providerId: string) {
   return `${providerType}:${providerId}`;
 }
 
+export function requiresKeyVerification(
+  provider: Pick<
+    ProviderConfig,
+    "requirements" | "authKind" | "checkAvailability"
+  >,
+) {
+  return (
+    provider.authKind !== "subscription" &&
+    !provider.checkAvailability &&
+    getRequiredConfigFields(provider.requirements).includes("api_key")
+  );
+}
+
 export function useProviderAvailability(
   providerType: ProviderType,
   providers: readonly ProviderConfig[],
@@ -199,7 +218,10 @@ export function useProviderAvailability(
   const configuredProviders = useAiProviders(providerType);
 
   const inputs = providers
-    .filter((provider) => provider.checkAvailability)
+    .filter(
+      (provider) =>
+        provider.checkAvailability || requiresKeyVerification(provider),
+    )
     .map((provider) => {
       const config =
         configuredProviders[providerRowId(providerType, provider.id)];
@@ -222,25 +244,35 @@ export function useProviderAvailability(
         providerType,
         provider.id,
         baseUrl,
-        apiKey,
+        providerCredentialIdentity({ provider: provider.id, baseUrl, apiKey }),
       ],
-      queryFn: () => provider.checkAvailability?.(baseUrl, apiKey) ?? false,
+      queryFn: async ({ signal }: { signal: AbortSignal }) => {
+        if (provider.checkAvailability)
+          return provider.checkAvailability(baseUrl, apiKey);
+        try {
+          await verifyProviderCredentials(
+            { provider: provider.id, baseUrl, apiKey },
+            tauriFetch,
+            signal,
+          );
+        } catch (error) {
+          if (error instanceof ProviderCredentialError && !error.retryable)
+            return false;
+          throw error;
+        }
+        return true;
+      },
       enabled: isConfigured,
       retry: false,
-      refetchInterval: 5_000,
+      staleTime: provider.checkAvailability ? 0 : 5 * 60_000,
+      gcTime: 0,
+      refetchInterval: provider.checkAvailability ? 5_000 : (false as const),
     })),
   });
 
   const entries = inputs.map(
     ({ provider, isConfigured }, index) =>
-      [
-        provider.id,
-        !isConfigured
-          ? false
-          : queries[index]?.isPending
-            ? undefined
-            : queries[index]?.data === true,
-      ] as const,
+      [provider.id, !isConfigured ? false : queries[index]?.data] as const,
   );
 
   // Callers put this record in memo dependency lists, so its identity has to
@@ -261,7 +293,10 @@ export function useIsProviderReady(
   const availability = useProviderAvailability(providerType, providers);
   const providerDef = providers.find((p) => p.id === providerId);
 
-  if (providerDef?.checkAvailability) {
+  if (
+    providerDef &&
+    (providerDef.checkAvailability || requiresKeyVerification(providerDef))
+  ) {
     return availability[providerId];
   }
 
@@ -302,7 +337,7 @@ export function NonAnarlogProviderCard({
   const billing = useBillingAccess();
   const [provider, providerMutation, providerStateReady] = useProvider(
     providerType,
-    config.id,
+    config,
   );
   const clearProvider = useClearAiProvider(providerType, config.id);
   const clearSubscription = useClearAiProvider(
@@ -373,6 +408,7 @@ export function NonAnarlogProviderCard({
         api_key: "",
       } satisfies AIProvider),
     listeners: {
+      onChangeDebounceMs: 500,
       onChange: ({ formApi }) => {
         providerMutation.reset();
         queueMicrotask(() => {
@@ -782,10 +818,13 @@ export function StyledStreamdown({
   );
 }
 
-function useProvider(providerType: ProviderType, id: string) {
+function useProvider(providerType: ProviderType, config: ProviderConfig) {
   const { providers, isReady } = useAiProvidersState(providerType);
-  const providerRow = providers[providerRowId(providerType, id)];
-  const providerMutation = useSetAiProvider(providerType, id);
+  const providerRow = providers[providerRowId(providerType, config.id)];
+  const providerMutation = useSetAiProvider(providerType, config.id, {
+    verifyCredentials: requiresKeyVerification(config),
+    defaultBaseUrl: config.baseUrl,
+  });
 
   const { data } = aiProviderSchema.safeParse(providerRow);
   return [data, providerMutation, isReady] as const;

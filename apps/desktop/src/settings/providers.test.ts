@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
+  verify: vi.fn(async () => {}),
   useLiveQuery: vi.fn(),
   getSecret: vi.fn(async () => ({
     status: "ok",
@@ -21,6 +22,10 @@ const mocks = vi.hoisted(() => ({
     (_statements: Array<{ sql: string; params: unknown[] }>) =>
       Promise.resolve([1]),
   ),
+}));
+
+vi.mock("@anlg/provider-validation", () => ({
+  verifyProviderCredentials: mocks.verify,
 }));
 
 vi.mock("@anlg/plugin-store2", () => ({
@@ -53,11 +58,13 @@ import {
   repairKeychainAccess,
   setAiProvider,
   useAiProvidersState,
+  useSetAiProvider,
 } from "./providers";
 
 describe("SQLite AI providers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.verify.mockResolvedValue(undefined);
     mocks.executeTransaction.mockResolvedValue([1]);
     mocks.getSecret.mockResolvedValue({ status: "ok", data: null });
     mocks.setSecret.mockResolvedValue({ status: "ok", data: null });
@@ -68,6 +75,98 @@ describe("SQLite AI providers", () => {
     });
     mocks.useLiveQuery.mockReturnValue({ data: [], isLoading: false });
   });
+
+  it("verifies API credentials before writing the keychain or provider settings", async () => {
+    mocks.execute.mockResolvedValue([]);
+    const queryClient = new QueryClient({
+      defaultOptions: { mutations: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    const { result } = renderHook(
+      () => useSetAiProvider("llm", "openai", { verifyCredentials: true }),
+      { wrapper },
+    );
+    const draft = { base_url: "https://api.openai.com/v1", api_key: "invalid" };
+    mocks.verify.mockRejectedValueOnce(
+      Error("The provider rejected this key."),
+    );
+    await expect(result.current.mutateAsync(draft)).rejects.toThrow("rejected");
+    expect(mocks.setSecret).not.toHaveBeenCalled();
+    expect(mocks.executeTransaction).not.toHaveBeenCalled();
+    await result.current.mutateAsync({ ...draft, api_key: "working" });
+    expect(mocks.setSecret).toHaveBeenCalled();
+    expect(mocks.executeTransaction).toHaveBeenCalled();
+    queryClient.clear();
+  });
+
+  it("preserves subscription credentials without an API-key probe", async () => {
+    mocks.execute.mockResolvedValue([]);
+    const queryClient = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    const { result } = renderHook(() => useSetAiProvider("llm", "claude"), {
+      wrapper,
+    });
+    await result.current.mutateAsync({
+      base_url: "https://api.anthropic.com",
+      api_key: "oauth-credential",
+    });
+    expect(mocks.verify).not.toHaveBeenCalled();
+    expect(mocks.setSecret).toHaveBeenCalled();
+    queryClient.clear();
+  });
+
+  it.each([
+    { stored: "", draft: undefined, expected: "https://api.openai.com/v1" },
+    { stored: "", draft: "  ", expected: "https://api.openai.com/v1" },
+    {
+      stored: "https://custom.test/v1",
+      draft: undefined,
+      expected: "https://custom.test/v1",
+    },
+    {
+      stored: "",
+      draft: "https://new.test/v1",
+      expected: "https://new.test/v1",
+    },
+  ])(
+    "verifies and stores the resolved provider URL: $expected",
+    async ({ stored, draft, expected }) => {
+      mocks.execute.mockResolvedValue([
+        {
+          id: "ai_provider:llm:openai",
+          value_json: JSON.stringify({
+            type: "llm",
+            base_url: stored,
+            api_key: "",
+          }),
+        },
+      ]);
+      const queryClient = new QueryClient();
+      const wrapper = ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client: queryClient }, children);
+      const { result } = renderHook(
+        () =>
+          useSetAiProvider("llm", "openai", {
+            verifyCredentials: true,
+            defaultBaseUrl: "https://api.openai.com/v1",
+          }),
+        { wrapper },
+      );
+      await result.current.mutateAsync({ api_key: "working", base_url: draft });
+      expect(mocks.verify).toHaveBeenCalledWith(
+        { provider: "openai", baseUrl: expected, apiKey: "working" },
+        expect.any(Function),
+      );
+      const persisted = mocks.executeTransaction.mock.calls[0][0][0].params[0];
+      expect(JSON.parse(String(persisted))).toMatchObject({
+        base_url: expected,
+        api_key: "",
+      });
+      queryClient.clear();
+    },
+  );
 
   it("waits for secure provider keys before reporting provider state as ready", async () => {
     let resolveSecret!: (value: { status: "ok"; data: string | null }) => void;

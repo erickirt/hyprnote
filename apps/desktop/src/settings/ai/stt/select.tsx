@@ -61,7 +61,12 @@ import {
 
 import { useBillingAccess } from "~/auth/billing-context";
 import { useNotifications } from "~/contexts/notifications";
-import { providerRowId, ProviderIconSlot } from "~/settings/ai/shared";
+import {
+  providerRowId,
+  ProviderIconSlot,
+  requiresKeyVerification,
+  useProviderAvailability,
+} from "~/settings/ai/shared";
 import {
   getProviderSelectionBlockers,
   requiresEntitlement,
@@ -619,7 +624,7 @@ function getModelCategoryLabel(category?: ModelCategory) {
   return null;
 }
 
-function useConfiguredMapping(): {
+export function useConfiguredMapping(): {
   providers: Record<
     ProviderId,
     {
@@ -630,6 +635,7 @@ function useConfiguredMapping(): {
   isReady: boolean;
 } {
   const billing = useBillingAccess();
+  const availability = useProviderAvailability("stt", PROVIDERS);
   const { providers: configuredProviders, isReady } =
     useAiProvidersState("stt");
   const { local_stt_model_path } = useConfigValues([
@@ -686,7 +692,11 @@ function useConfiguredMapping(): {
           config: { base_url: baseUrl, api_key: apiKey },
         }).length === 0;
 
-      if (!eligible) {
+      if (
+        !eligible ||
+        (requiresKeyVerification(provider) &&
+          availability[provider.id] !== true)
+      ) {
         return [provider.id, { configured: false, models: [] }];
       }
 
@@ -774,7 +784,11 @@ function useConfiguredMapping(): {
 
   return {
     providers,
-    isReady: isReady && supportedModels.isFetched && deviceInfo.isFetched,
+    isReady:
+      isReady &&
+      supportedModels.isFetched &&
+      deviceInfo.isFetched &&
+      Object.values(availability).every((value) => value !== undefined),
   };
 }
 
