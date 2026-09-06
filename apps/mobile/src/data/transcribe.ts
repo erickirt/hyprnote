@@ -19,6 +19,7 @@ import {
   normalizeTranscriptionResponse,
   type ProviderConfig,
 } from "@/settings/providers-model";
+import { batchTranscriptionModel } from "@/settings/transcription-mode";
 
 import { requestProviderTranscription } from "./provider-transcription";
 import { TranscriptionAdmission } from "./transcription-admission";
@@ -327,6 +328,7 @@ function isPermanentTranscriptionFailure(error: unknown): boolean {
     "audio_missing",
     "audio_too_large",
     "stt_response_too_large",
+    "stt_live_only",
   ].includes(String(code));
 }
 
@@ -436,7 +438,15 @@ async function runTranscription(sessionId: string): Promise<void> {
     });
   }
 
-  const provider = await resolveProvider("stt");
+  const selected = await resolveProvider("stt");
+  const model = batchTranscriptionModel(selected.provider, selected.model);
+  if (!model)
+    throw transcriptionFailure(
+      "This provider only transcribes live. Choose another provider to transcribe this saved recording.",
+      "request",
+      { code: "stt_live_only" },
+    );
+  const provider = { ...selected, model };
   const preferences = await readPreferences();
   const token = provider.provider === "anarlog" ? provider.apiKey : undefined;
   const startedAtMs = Date.now();
