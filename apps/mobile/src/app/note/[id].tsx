@@ -1,21 +1,20 @@
-import { createStyleHook,useColors } from "@/settings/theme-provider";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation } from "@tanstack/react-query";
-import { File,Paths } from "expo-file-system";
+import { File, Paths } from "expo-file-system";
 import * as Linking from "expo-linking";
-import { useLocalSearchParams,useRouter } from "expo-router";
-import { useRef,useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useRef, useState } from "react";
 import {
-Alert,
-InputAccessoryView,
-Keyboard,
-Platform,
-Pressable,
-ScrollView,
-Share,
-Text,
-TextInput,
-View
+  Alert,
+  InputAccessoryView,
+  Keyboard,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -32,38 +31,39 @@ import { StartListeningButton } from "@/components/start-listening-button";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { IconButton } from "@/components/ui/icon-button";
-import { Spacing,Typography } from "@/constants/theme";
+import { Spacing, Typography } from "@/constants/theme";
 import { useSessionAudio } from "@/data/audio-catalog";
 import { importRecordingIntoSession } from "@/data/import-voice-memo";
 import {
-type NoteAttachment,
-useNoteAttachments,
+  type NoteAttachment,
+  useNoteAttachments,
 } from "@/data/note-attachment-catalog";
 import { insertCapturedNoteAttachmentMarkdown } from "@/data/note-attachment-model";
 import { pickAndCatalogNoteAttachment } from "@/data/note-attachments";
 import {
-restoreNoteAttachmentFromCloud,
-shareNoteAttachment,
+  restoreNoteAttachmentFromCloud,
+  shareNoteAttachment,
 } from "@/data/restore-note-attachment";
 import {
-restoreSessionAudioFromCloud,
-restoreSessionAudioFromPicker,
+  restoreSessionAudioFromCloud,
+  restoreSessionAudioFromPicker,
 } from "@/data/restore-session-audio";
 import {
-deleteSession,
-saveSessionNote,
-saveSessionTitle,
-useSessionDetail,
+  deleteSession,
+  saveSessionNote,
+  saveSessionTitle,
+  useSessionDetail,
 } from "@/data/session";
 import { summarizeSession } from "@/data/summarize";
-import { transcribeSession,useTranscriptionState } from "@/data/transcribe";
+import { transcribeSession, useTranscriptionState } from "@/data/transcribe";
 import { useSessionTranscripts } from "@/data/transcripts";
 import { captureAnalytics } from "@/lib/analytics";
 import { confirmDestructive } from "@/lib/confirm";
-import { applyEditorFormat,type EditorFormat } from "@/lib/editor-format";
+import { applyEditorFormat, type EditorFormat } from "@/lib/editor-format";
 import { env } from "@/lib/env";
 import { captureOperationalError } from "@/lib/error-reporting";
 import { useMountEffect } from "@/lib/use-mount-effect";
+import { createStyleHook, useColors } from "@/settings/theme-provider";
 
 function BodyEditor({
   accessoryId,
@@ -256,7 +256,12 @@ export default function NoteScreen() {
   const audio = useSessionAudio(id);
   const noteAttachments = useNoteAttachments(id);
   const transcripts = useSessionTranscripts(id);
-  const summarize = useMutation({ mutationFn: async () => { await flush(true); await summarizeSession(id); } });
+  const summarize = useMutation({
+    mutationFn: async () => {
+      await flush(true);
+      await summarizeSession(id);
+    },
+  });
   const transcription = useTranscriptionState(id);
   const [listening, setListening] = useState(listen === "1");
   const [editorFocused, setEditorFocused] = useState(false);
@@ -734,10 +739,25 @@ export default function NoteScreen() {
               )}
             </Card>
           )}
-          {!listening && (transcripts.length > 0 || data.noteText.trim() !== "") && <View>
-            <Button label={data.summary ? "Regenerate summary" : "Generate summary"} loading={summarize.isPending} variant="ghost" size="small" onPress={() => summarize.mutate()} />
-            {summarize.error && <Text style={styles.summaryText}>{summarize.error.message}</Text>}
-          </View>}
+          {!listening &&
+            (transcripts.length > 0 || data.noteText.trim() !== "") && (
+              <View>
+                <Button
+                  label={
+                    data.summary ? "Regenerate summary" : "Generate summary"
+                  }
+                  loading={summarize.isPending}
+                  variant="ghost"
+                  size="small"
+                  onPress={() => summarize.mutate()}
+                />
+                {summarize.error && (
+                  <Text style={styles.summaryText}>
+                    {summarize.error.message}
+                  </Text>
+                )}
+              </View>
+            )}
           {audio.data && localAudioAvailable && localAudioFile && (
             <View key={`${audio.data.filename}:${audio.data.createdAt}`}>
               <AudioChip
@@ -894,12 +914,12 @@ const useStyles = createStyleHook((Colors) => ({
     flex: 1,
   },
   title: {
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.md,
     ...Typography.title,
     color: Colors.ink,
   },
   summary: {
-    marginHorizontal: Spacing.lg,
+    marginHorizontal: Spacing.md,
     marginTop: Spacing.md,
     padding: Spacing.md,
   },
@@ -921,13 +941,13 @@ const useStyles = createStyleHook((Colors) => ({
     color: Colors.ink,
   },
   transcribeStatus: {
-    marginHorizontal: Spacing.lg,
+    marginHorizontal: Spacing.md,
     marginTop: Spacing.xs,
     ...Typography.caption,
     color: Colors.muted,
   },
   transcribeAction: {
-    marginHorizontal: Spacing.lg,
+    marginHorizontal: Spacing.md,
     marginTop: Spacing.xs,
     ...Typography.captionStrong,
     color: Colors.ink,
@@ -936,7 +956,7 @@ const useStyles = createStyleHook((Colors) => ({
     opacity: 0.6,
   },
   transcript: {
-    marginHorizontal: Spacing.lg,
+    marginHorizontal: Spacing.md,
     marginTop: Spacing.sm,
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.sm,
@@ -957,7 +977,7 @@ const useStyles = createStyleHook((Colors) => ({
   },
   attachments: {
     gap: Spacing.sm,
-    marginHorizontal: Spacing.lg,
+    marginHorizontal: Spacing.md,
     marginTop: Spacing.md,
   },
   attachmentLabel: {
@@ -968,7 +988,7 @@ const useStyles = createStyleHook((Colors) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.xs,
-    marginHorizontal: Spacing.lg,
+    marginHorizontal: Spacing.md,
     marginTop: Spacing.sm,
   },
   readOnlyLabel: {
@@ -977,7 +997,7 @@ const useStyles = createStyleHook((Colors) => ({
   },
   body: {
     flex: 1,
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.md,
     paddingTop: Spacing.md,
     ...Typography.body,
     color: Colors.ink,
